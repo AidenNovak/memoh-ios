@@ -147,20 +147,23 @@ export function SceneScreen() {
         <Text style={[typography.headline, { color: palette.label }]} numberOfLines={1}>
           {scene.title}
         </Text>
-        <Text style={[typography.caption, { color: palette.secondaryLabel }]} numberOfLines={2}>
-          {scene.expect}
-        </Text>
-        {/* 场景 id 上屏：验收脚本靠它确认"确实是这个场景"，人看截图时也能一眼对上。
-            比用标题文字匹配可靠——标题里的全角标点 OCR 认出来未必一致。 */}
-        <Text
-          style={[typography.caption2, { color: palette.tertiaryLabel }]}
-        >{`#${scene.id}`}</Text>
-        {/* 进度：确认帧确实放完了，而不是停在中间。 */}
-        <Text style={[typography.caption2, { color: done ? palette.success : palette.warning }]}>
-          {done
-            ? `replayed ${progress.total}/${progress.total}`
-            : `frame ${progress.current}/${progress.total}`}
-        </Text>
+        {/* 调试信息刻意保持**极简**：只有标题、id、进度三行。
+            场景的"期望效果"在场景索引页里看（那里是浏览的地方），不占截图——
+            截图上多一行说明文字，就多一分"这是原型不是产品"的观感，而截图正是
+            拿来判断观感的。
+
+            id 必须留在屏幕上：验收脚本靠它确认"确实是这个场景"，比匹配中文标题可靠
+            （标题里的全角标点 OCR 认出来未必一致）。 */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+          <Text
+            style={[typography.caption2, { color: palette.tertiaryLabel }]}
+          >{`#${scene.id}`}</Text>
+          <Text style={[typography.caption2, { color: done ? palette.success : palette.warning }]}>
+            {done
+              ? `replayed ${progress.total}/${progress.total}`
+              : `frame ${progress.current}/${progress.total}`}
+          </Text>
+        </View>
       </View>
 
       {chat.runStatus === 'errored' ? (

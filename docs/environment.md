@@ -155,6 +155,40 @@ pnpm verify:simulator --name 'chat roundtrip' -- zsh -euc '
 读它并自动执行 `apps/mobile/src/features/verify/` 里定义的动作。被验证的是真实路径，
 省掉的只有"手指点屏幕"。种子文件里有密码，拷进模拟器沙箱、用完即删，不进仓库。
 
+### 看界面长什么样：场景台
+
+改设计之前先能**看见**现状。场景台把每种状态渲染出来截图，**不连服务端、不需要凭据**：
+
+```bash
+pnpm verify:simulator --name scenes -- zsh -euc '
+  pnpm verify:build
+  pnpm verify:ui --app "$(pnpm --silent verify:build)" --case scenes
+'
+```
+
+8 个场景 × 2 种外观，几十秒出全部截图，落在
+`apps/mobile/verification/ui/results/<run-id>/`。场景清单与内容在
+`apps/mobile/src/features/verify/scenes.ts`——它是**协议帧序列**，由真实 reducer
+回放后交给生产组件渲染，所以每个场景顺带就是 reducer 的集成测试。
+
+在模拟器里手点也行：Debug → Scenes → 点进任意场景。
+
+看图之前可以先量一遍硬数据：
+
+```bash
+python3 apps/mobile/verification/ui/tools/measure_surfaces.py <screenshot.png>
+```
+
+它报告配色占比与每种颜色的出现区间。**不能替代看图**（字号、间距、截断它看不到），
+但"两种东西是不是同一个颜色"这类问题不该靠眼睛猜——用户气泡和工具卡片撞色的那个
+问题（同一种灰占了整屏 49%）就是它发现的。
+
+两个已知的观感限制，评审时别当成产品问题：
+
+- 场景页有一条极简调试头（标题 + `#id` + `replayed n/n`）。`#id` 是验收脚本确认
+  "切对了场景"的依据，删不得；但截图里它确实不是产品的一部分。
+- 场景页**没有输入栏**（真实 `ChatScreen` 有）。场景只负责渲染消息流的状态。
+
 ## 生产不要照抄的地方
 
 这套环境是**开发用**的，有意做了简化，别拿它当部署模板：

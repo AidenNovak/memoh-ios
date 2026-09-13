@@ -18,7 +18,7 @@
     "lint": "pnpm --filter @memoh-ios/mobile lint",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "pnpm typecheck && pnpm i18n:check && pnpm ternary:check && pnpm format:check",
+    "check": "pnpm typecheck && pnpm typecheck:kit && pnpm i18n:check && pnpm ternary:check && pnpm format:check",
     "test": "pnpm --filter @memoh-ios/mobile test && pnpm test:swift",
     "verify:build": "pnpm --filter @memoh-ios/mobile verify:build",
     "verify:ui": "pnpm --filter @memoh-ios/mobile verify:ui",
@@ -28,7 +28,8 @@
     "dev:env": "./infra/local/memoh-tunnel.sh start",
     "dev:env:stop": "./infra/local/memoh-tunnel.sh stop",
     "ternary:check": "pnpm --filter @memoh-ios/mobile ternary:check",
-    "test:swift": "bash Tools/run-logic-tests.sh"
+    "test:swift": "bash tools/run-logic-tests.sh",
+    "typecheck:kit": "bash tools/typecheck-kit.sh"
   },
   "devDependencies": {
     "prettier": "^3.6.2",

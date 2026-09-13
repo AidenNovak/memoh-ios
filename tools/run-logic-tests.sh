@@ -20,16 +20,18 @@ REMOTE="${MEMOH_BUILD_HOST:-vultr-sg}"
 REMOTE_DIR="/opt/memoh-kit-tests"
 IMAGE="swift:6.2-noble"
 
-# 只传需要的两个文件：Transcript.swift（政策与数据）与测试文件本身。
-# 顺便把 `#if canImport(MemohKit)` 关掉——远端没有那个模块，也不需要。
+# 只传需要的三个文件：Transcript.swift（政策与数据）、MemohStrings.swift（纯逻辑测试
+# 也要拼状态文案）、以及测试文件本身。顺便把 `#if canImport(MemohKit)` 关掉——
+# 远端没有那个模块，也不需要。
 ssh "$REMOTE" "mkdir -p $REMOTE_DIR"
 scp -q "$ROOT/apps/mobile/modules/memoh-kit/ios/Chat/Transcript.swift" \
+       "$ROOT/apps/mobile/modules/memoh-kit/ios/Support/MemohStrings.swift" \
        "$ROOT/apps/mobile/modules/memoh-kit/verification/MessageListTests.swift" \
        "$REMOTE:$REMOTE_DIR/"
 
 ssh "$REMOTE" "docker run --rm --memory=2g --cpus=2 -v $REMOTE_DIR:/src -w /src $IMAGE bash -lc '
 set -e
 sed -i \"s/#if canImport(MemohKit)/#if false/\" MessageListTests.swift
-swiftc -O Transcript.swift MessageListTests.swift -o logic-tests
+swiftc -O Transcript.swift MemohStrings.swift MessageListTests.swift -o logic-tests
 ./logic-tests
 '"

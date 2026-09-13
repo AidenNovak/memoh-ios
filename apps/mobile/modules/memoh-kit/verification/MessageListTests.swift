@@ -23,7 +23,8 @@ final class MessageListTests: XCTestCase {
     let done = try XCTUnwrap(TranscriptRow.decode(MessageListLogicTests.transcript(
       #"[{"key":"tool","kind":"tool","name":"exec","status":"done"}]"#)).first)
     tool.configure(done)
-    XCTAssertEqual(tool.stateLabel.text, MemohStrings.text("Done"))
+    XCTAssertTrue(tool.stateLabel.isHidden, "完成态不贴状态词")
+    XCTAssertTrue(tool.symbol.isHidden, "完成态不给图标")
     XCTAssertFalse(tool.accessibilityLabel?.contains("Permission denied") == true)
     XCTAssertFalse(tool.accessibilityLabel?.contains("pytest") == true)
 
@@ -178,10 +179,21 @@ final class MessageListTests: XCTestCase {
       #"[{"key":"tool","kind":"tool","name":"exec","status":"running","execution_location":{"kind":"container","name":"workspace"}}]"#)).first)
     let cell = ToolMessageCell(frame: .zero)
     cell.configure(row)
-    XCTAssertEqual(cell.heading.text, "exec", "标题该是工具名，不是状态")
-    XCTAssertEqual(cell.stateLabel.text, "Running · workspace",
-                   "状态与执行位置合成一行，跟在工具名后面")
+    // 标题 = 工具名 + 执行位置（位置挂在这一行上，不单独占一行）。
+    XCTAssertEqual(cell.heading.text, "exec · workspace")
+    XCTAssertEqual(cell.stateLabel.text, "Running", "状态行只回答「现在怎么样」")
     XCTAssertFalse(cell.stateLabel.isHidden)
+    XCTAssertTrue(cell.spinner.isAnimating, "执行中要有活的指示，静止图标会被读成卡住")
+    XCTAssertTrue(cell.symbol.isHidden, "进行中只给 spinner，不叠静态图标")
+
+    // 完成之后**不给状态词、也不给图标**：完成是常态，而且对勾在断言"成功了"。
+    let finished = try XCTUnwrap(TranscriptRow.decode(MessageListLogicTests.transcript(
+      #"[{"key":"tool","kind":"tool","name":"exec","status":"done","execution_location":{"kind":"container","name":"workspace"}}]"#)).first)
+    cell.configure(finished)
+    XCTAssertTrue(cell.stateLabel.isHidden, "完成态不贴状态词")
+    XCTAssertTrue(cell.symbol.isHidden, "完成态不给图标——它不该断言这次调用成功")
+    XCTAssertFalse(cell.spinner.isAnimating, "跑完了要停掉 spinner，不能留着空转")
+    XCTAssertEqual(cell.heading.text, "exec · workspace", "位置仍然显示，只是不占状态行")
   }
 }
 #endif
@@ -226,6 +238,73 @@ final class MessageListLogicTests: XCTestCase {
   func testHierarchySeparatesUserBubblesFromAgentActivity() {
     XCTAssertNotEqual(MessageListMetrics.userSurface, MessageListMetrics.activitySurface,
                       "用户气泡与 agent 活动卡片必须是不同的表面，否则屏幕上没有层级")
+  }
+
+  /**
+   工具诊断：从 output 内部读，与上游 `tool-result-error.ts` 同一套判据。
+
+   为什么必须从 output 读：协议里工具块**只有 `running: Bool`**，没有 is_error /
+   status 字段（`internal/agent/view/uimessage.go:58`）。"这个工具出错了"在传输层
+   不存在，只有输出内容里才有线索。
+   */
+  func testToolResultDiagnosisReadsUpstreamShape() throws {
+    let block = try XCTUnwrap(TranscriptRow.decode(MessageListLogicTests.transcript(
+      #"[{"key":"tool","kind":"tool","name":"exec","status":"done","output":{"isError":true,"content":[{"type":"text","text":"Module not found"}]}}]"#)).first)
+    let diagnosis = ToolResultDiagnosis.read(block.block.output)
+    XCTAssertTrue(diagnosis.isError)
+    XCTAssertEqual(diagnosis.text, "Module not found")
+
+    // structuredContent 包一层也要能读到（上游也认这种）。
+    let nested = try XCTUnwrap(TranscriptRow.decode(MessageListLogicTests.transcript(
+      #"[{"key":"tool","kind":"tool","output":{"structuredContent":{"isError":true,"content":[{"type":"text","text":"ENOENT"}]}}}]"#)).first)
+    XCTAssertEqual(ToolResultDiagnosis.read(nested.block.output).text, "ENOENT")
+
+    // 正常输出：不是错误，不该冒出诊断文字。
+    let ok = try XCTUnwrap(TranscriptRow.decode(MessageListLogicTests.transcript(
+      #"[{"key":"tool","kind":"tool","output":{"content":[{"type":"text","text":"ok"}]}}]"#)).first)
+    let okDiagnosis = ToolResultDiagnosis.read(ok.block.output)
+    XCTAssertFalse(okDiagnosis.isError)
+
+    // 没有 output（还在跑、或服务端没给）：什么都不猜。
+    let none = try XCTUnwrap(TranscriptRow.decode(MessageListLogicTests.transcript(
+      #"[{"key":"tool","kind":"tool","running":true}]"#)).first)
+    XCTAssertEqual(ToolResultDiagnosis.read(none.block.output), .none)
+    XCTAssertEqual(ToolResultDiagnosis.read(nil), .none)
+
+    // **非零退出码不算失败**——上游只用它显示退出码。这条最容易写反。
+    let exitCode = try XCTUnwrap(TranscriptRow.decode(MessageListLogicTests.transcript(
+      #"[{"key":"tool","kind":"tool","output":{"exit_code":1,"stdout":"compiling..."}}]"#)).first)
+    XCTAssertFalse(ToolResultDiagnosis.read(exitCode.block.output).isError,
+                   "exit_code != 0 不等于工具失败：agent 试错是正常干活过程")
+  }
+
+  /**
+   状态词只在需要说明的时候出现。
+   
+   曾出现"卡片写 Done、下一行红字说 Module not found"，两轮视觉评审都判为矛盾。
+   根因是我们给"完成"也贴了标签——而完成是常态，全部工具都会完成。
+   */
+  func testToolStatusLabelOnlyWhenItExplainsSomething() {
+    XCTAssertTrue(MessageListMetrics.showsToolStatus(.running), "用户正等着，必须说明在跑")
+    XCTAssertTrue(MessageListMetrics.showsToolStatus(.failed), "服务端明确说这条出错了")
+    XCTAssertFalse(MessageListMetrics.showsToolStatus(.done), "完成是常态，对勾足够")
+    XCTAssertFalse(MessageListMetrics.showsToolStatus(.unknown), "不知道就不多说一句")
+
+    // 只有 running 才把执行位置带上（那时它依附于一个存在的状态词）。
+    XCTAssertEqual(MessageListMetrics.toolStatusText(state: .running), "Running")
+    XCTAssertEqual(MessageListMetrics.toolStatusText(state: .failed), "Failed")
+    XCTAssertNil(MessageListMetrics.toolStatusText(state: .done), "完成态不贴状态词")
+    XCTAssertNil(MessageListMetrics.toolStatusText(state: .unknown))
+
+    // 图标同理：只有需要用户注意的两种状态才配一个图标。
+    // 完成态没有图标——三份视觉评审都把"灰色对勾 + 红色报错"读成矛盾。
+    XCTAssertTrue(MessageListMetrics.showsToolIcon(.failed), "服务端说这条出错了，要一个警告图标")
+    // running **不给静态图标**：那个状态已经由 spinner 表达，再来一个图标就是
+    // 两个东西说同一句话（视觉评审："spinner 旁边还挂了一个沙漏，语义重复"）。
+    XCTAssertFalse(MessageListMetrics.showsToolIcon(.running),
+                   "进行中由 spinner 表达，不要再叠一个静态图标")
+    XCTAssertFalse(MessageListMetrics.showsToolIcon(.done), "对勾在断言「成功了」，而上游说不能这样推导")
+    XCTAssertFalse(MessageListMetrics.showsToolIcon(.unknown))
   }
 
   /** 工具标题的显示规则：同一句话不该在卡片上出现两次。 */
@@ -360,6 +439,8 @@ enum MessageListTestRunner {
       ("testToolStateMapping", MessageListLogicTests.testToolStateMapping),
       ("testHierarchySeparatesUserBubblesFromAgentActivity", MessageListLogicTests.testHierarchySeparatesUserBubblesFromAgentActivity),
       ("testToolTitleVisibility", MessageListLogicTests.testToolTitleVisibility),
+      ("testToolStatusLabelOnlyWhenItExplainsSomething", MessageListLogicTests.testToolStatusLabelOnlyWhenItExplainsSomething),
+      ("testToolResultDiagnosisReadsUpstreamShape", MessageListLogicTests.testToolResultDiagnosisReadsUpstreamShape),
       ("testToolInputShapesAndInputOnlyUpdates", MessageListLogicTests.testToolInputShapesAndInputOnlyUpdates),
       ("testReasoningStateSurvivesStreamingAndUsesFullIdentity", MessageListLogicTests.testReasoningStateSurvivesStreamingAndUsesFullIdentity),
       ("testAttachmentsCountTypesAndSizes", MessageListLogicTests.testAttachmentsCountTypesAndSizes),

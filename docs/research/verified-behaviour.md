@@ -305,3 +305,43 @@ result.isError === true || result.structuredContent.isError === true
 （"Running"/"Done"），快工具只是文字换一次，一帧的事，不值得为它引入一套
 逐行的延迟计时器——那反而是抖动和状态错乱的来源。如果以后把 running 换成动画，
 这条就得重新考虑。
+
+## 17. 工具块没有失败状态，诊断只在 output 里
+
+**协议**：`internal/agent/view/uimessage.go:58` 的 `UIMessage` 只有 `running *bool`。
+没有 `is_error`、没有 `status`。所以服务端能表达的只有"跑完了"和"还在跑"。
+
+**上游怎么判断工具出错**：`apps/web/src/pages/home/components/tool-result-error.ts`
+从 output **内部**读：
+
+```
+result.isError === true || result.structuredContent.isError === true
+```
+
+错误正文从 `content[].text`（或 `structuredContent.content[].text`）取。
+
+**明确不算失败的**：`exit_code !== 0`。上游只用它显示退出码
+（`tool-call-detail-exec.vue`），不当作失败——agent 跑一个非零退出的命令是正常干活。
+
+**这条的后果（踩到了）**：我们的工具卡片原来读 `block.error`，而协议里工具块**没有**
+这个字段，所以那行永远是空的。于是"构建失败"的工具在界面上和成功的一模一样——
+视觉评审直接指出「第三张卡写着 Done，下面的回复却说构建失败了」。
+
+现在从 output 读诊断并显示，但**不给标题染色**（理由见第 15 条）。
+
+---
+
+## 18. 跨主机的构建/测试分布（本机不是构建机）
+
+**不是协议，是环境约束**，但踩过就要记：
+
+- 本机 Mac 上跑 iOS 构建会把 load 推到 165+（实测），而本机还在同时跑别的活。
+- Swift **纯逻辑**测试（不依赖 UIKit 的那些）可以在构建机的 swift 容器里编译运行：
+  `tools/run-logic-tests.sh`。它是 `swift-corelibs-xctest` 的标准用法，
+  和 CI 行为一致；在 macOS 上用命令行跑 XCTest 反而要折腾 `libXCTestSwiftSupport`
+  的运行环境，不值得。
+
+**做得到的**：`#if !canImport(UIKit)` 那一半（数据、政策、布局计算、诊断解析）。
+**做不到的**：任何 `canImport(UIKit)` 的断言（颜色映射、cell 复用、列表虚拟化）——
+那些必须在 iOS hosted XCTest target 里跑，目前**尚未接入**。
+不要把"纯逻辑测试通过"说成"模块测试通过"，那是两件事。

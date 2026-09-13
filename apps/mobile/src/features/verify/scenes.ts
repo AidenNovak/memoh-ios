@@ -124,9 +124,12 @@ const TURN_USER = 'scene-turn';
 export const SCENES: Scene[] = [
   {
     id: 'chat-tools',
-    title: '工具调用：执行中 / 完成 / 失败',
-    intent: '三个状态必须一眼可辨，且**不靠颜色单独传达**（色盲与强光下都要能读）。',
-    expect: '每张卡片右侧或标题里有状态文字；执行中的有明显但不闪烁的活动指示。',
+    title: '工具调用：执行中 / 完成 / 输出里有错误',
+    intent:
+      '三个状态必须一眼可辨，且**不靠颜色单独传达**（色盲与强光下都要能读）。' +
+      '「输出里有错误」刻意不等于「失败」——协议层没有工具失败状态，' +
+      '上游也明确说不能从一次工具调用推导任务失败（见 verified-behaviour 第 15 条）。',
+    expect: '每张卡片有状态的文字表达；执行中有一个正在转动的指示；错误正文标红但不给标题染色。',
     frames: [
       emptySnapshot(),
       runningSnapshot(1),
@@ -139,7 +142,7 @@ export const SCENES: Scene[] = [
             {
               turn_id: TURN_USER,
               role: 'user',
-              text: '把报告里的三个图表重新生成，然后跑测试',
+              text: '把报告的图表重新生成，然后跑一遍测试',
               turn_position: 1,
             },
           ],
@@ -182,18 +185,24 @@ export const SCENES: Scene[] = [
               name: 'exec',
               running: false,
               input: { command: 'npm run build' },
-              output: 'error: Module not found: @scope/missing',
+              // 真实的工具输出形状：诊断藏在 output 内部（`isError` + `content[].text`），
+              // 而 `running: false` 一律映射成 done——协议层没有"工具失败"这个状态。
+              // 场景要照实反映这一点，否则截图会给人"服务端会给失败状态"的错觉。
+              output: {
+                isError: true,
+                content: [{ type: 'text', text: 'Module not found: @scope/missing' }],
+              },
             },
           ],
         },
       },
-      ...streamText(13, ['', '三个图表', '已重新生成', '；构建', '失败了', '，缺一个依赖。'], 5),
-      {
-        kind: 'delta',
-        epoch: EPOCH,
-        seq: 20,
-        delta: { run: { run_id: 'scene-run', status: 'completed' } },
-      },
+      // 刻意**停在这里**：一个工具还在跑，所以没有最终回复。
+      //
+      // 原来这个场景结尾写了一句"三个图表已重新生成；构建失败了"并把 run 置为
+      // completed——那是自相矛盾的：真实的 agent 循环里最终回复要等所有工具结束，
+      // 而且那句话声称生成了三个图表、实际只有一次写入调用。视觉评审把这两点
+      // 都指出来了。场景要么是一次真实的"进行中"切面，要么是一次真实的"已完成"，
+      // 不能为了多展示几个状态就把两个时刻拼在一起。
     ],
   },
 

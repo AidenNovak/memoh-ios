@@ -18,6 +18,8 @@ struct TranscriptBlock: Decodable, Equatable, Sendable {
   let location: String?
   let code: String?
   let input: ToolInput?
+  /** 工具的输出。只用来读诊断（见 `ToolResultDiagnosis`），不当正文渲染。 */
+  let output: ToolInput?
   let items: [Attachment]?
 
   struct Attachment: Decodable, Equatable, Sendable {
@@ -140,6 +142,70 @@ indirect enum ToolInput: Codable, Equatable, Sendable {
     case .object, .array, .null: return ""
     }
   }
+
+  /** 按键取名，用于在未知形状的 JSON 里找字段。 */
+  func field(_ key: String) -> ToolInput? {
+    if case .object(let fields) = self { return fields[key] }
+    return nil
+  }
+}
+
+/**
+ 工具结果的诊断信息。
+ 
+ ## 为什么要读 output 才知道工具出没出错
+ 
+ 传输层的 `UIMessage` **只有 `running: Bool`**，没有 `is_error` / `status` 字段
+ （`internal/agent/view/uimessage.go:58`）。所以"这个工具失败了"这件事在协议层面
+ 不存在——服务端只告诉你"跑完了"。
+ 
+ 上游 Web 客户端是从 output **内部**读的
+ （`apps/web/src/pages/home/components/tool-result-error.ts`）：
+ 
+ ```
+ result.isError === true || result.structuredContent.isError === true
+ ```
+ 
+ 注意 `exit_code !== 0` **不算失败**——上游只用它显示退出码。这个区分很重要：
+ agent 在虚拟机里试错、跑一个非零退出的命令是正常的干活过程。
+ 
+ ## 读到之后怎么用
+ 
+ **只用来显示诊断文字，不给标题着色。** 上游把理由写在了
+ `tool-call-inline.vue:225`：「非零退出码（包括 -1）或工具 isError 不等于用户任务
+ 失败。标题保持中性色……诊断留在展开详情中。」一次工具失败 ≠ 这一步失败 ≠ 任务失败。
+ */
+struct ToolResultDiagnosis: Equatable {
+  let isError: Bool
+  let text: String?
+
+  static let none = ToolResultDiagnosis(isError: false, text: nil)
+
+  /** 从 output 的任意 JSON 形状里读出诊断。读不出就返回 `.none`，绝不猜。 */
+  static func read(_ output: ToolInput?) -> ToolResultDiagnosis {
+    guard let output else { return .none }
+    let structured = output.field("structuredContent") ?? output
+    let isError = structured.field("isError")?.scalarText == "true"
+    // 错误正文可能是 `content` 字符串、`content[].text`、或 `stderr`。
+    let text = firstText(in: structured.field("content"))
+      ?? firstText(in: structured.field("stderr"))
+    return ToolResultDiagnosis(isError: isError, text: text)
+  }
+
+  private static func firstText(in value: ToolInput?) -> String? {
+    guard let value else { return nil }
+    if case .string(let text) = value {
+      let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+      return trimmed.isEmpty ? nil : trimmed
+    }
+    if case .array(let items) = value {
+      let texts = items.compactMap { item -> String? in
+        item.field("text")?.scalarText ?? (item.isScalar ? item.scalarText : nil)
+      }.filter { !$0.isEmpty }
+      return texts.isEmpty ? nil : texts.joined(separator: "\n")
+    }
+    return nil
+  }
 }
 
 // Presentation state belongs to the list, never to a recycled cell or the transport.
@@ -215,6 +281,53 @@ enum MessageListMetrics {
     guard let title, !title.isEmpty else { return false }
     if title == name { return false }
     return !toolTitleRepeatsInput(title: title, inputPreview: inputPreview)
+  }
+
+  /**
+   工具卡片要不要显示状态词。
+   
+   **只在需要说明的时候出现**：运行中（用户正等着）、失败（服务端明确说这条出错了）。
+   完成与未知都不贴标签。
+   
+   理由：全部工具都会完成，给每一个都贴 "Done" 等于一屏里重复十几次同一句话，
+   那是噪声不是信息。上游也是这么做的（`tool-call-inline.vue` 的
+   `showPendingLabel` 就是 `title.pending`——只在未完成时显示）。
+   
+   而且它消掉了一个真实出现过的矛盾：曾出现"卡片写着 Done、下一行红字说
+   Module not found"，两轮视觉评审都判定为"状态与内容打架"。"跑完了"和
+   "输出里有错误"本来就是两件事，硬贴一个 Done 等于替用户下结论。
+   */
+  static func showsToolStatus(_ state: ToolState) -> Bool {
+    switch state {
+    case .running, .failed: return true
+    case .done, .unknown: return false
+    }
+  }
+
+  /**
+   工具卡片要不要显示左边的图标。
+   
+   只有两件事值得一个图标：**正在跑**（用户要等着）和**服务端说这条出错了**。
+   完成态没有图标——上游那一行根本没有状态图标，而我原来给完成贴的对勾在断言
+   "这次调用成功了"，与"不能从一次工具调用推导成败"（第 15 条）相冲。
+   三份视觉评审都把"灰色对勾 + 红色报错"读成矛盾，说明图标不该说话。
+   
+   ⚠️ 调用方还要再排除 running：那个状态由 spinner 表达，再来一个静态图标就是
+   两个东西说同一句话（`ToolMessageCell.configure` 里做这个排除）。
+   */
+  static func showsToolIcon(_ state: ToolState) -> Bool {
+    state == .failed
+  }
+
+  /**
+   状态行文案。
+   
+   执行位置不在这里——它挂在标题行上（`exec · workspace`），因为它是"这个工具在
+   哪儿跑"的修饰。状态行只回答"现在怎么样"。
+   */
+  static func toolStatusText(state: ToolState) -> String? {
+    guard showsToolStatus(state) else { return nil }
+    return MemohStrings.text(state.titleKey)
   }
 
   static func reasoningLineLimit(expanded: Bool) -> Int { expanded ? 0 : 3 }

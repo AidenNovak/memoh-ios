@@ -45,7 +45,18 @@ import { NativeMessageList } from '@memoh-ios/kit';
   只是不用颜色替用户下结论。见 `docs/research/verified-behaviour.md` 第 15 条。
 - 工具卡片两行：`<工具名> <状态 · 执行位置>` 然后入参。工具名是 headline（主体），
   状态是 subheadline + 次要色（它的修饰）——曾经两者都是 headline 且各占一行，
-  分不清哪个是主体。状态**文字**必须保留（"Running"/"Done"），图标只做辅助。
+  分不清哪个是主体。
+- **状态词与状态图标只在需要说明时出现**：`running`（用户正等着）与 `failed`
+  （服务端说这条出错了）。`done` 与 `unknown` **不贴标签、也不给图标**——
+  所有工具都会完成，给每一个都贴 "Done" 是一屏重复十几次的噪声；
+  而一枚对勾等于在断言"这次调用成功了"，与"不能从一次工具调用推导成败"相冲
+  （上游 `tool-call-inline.vue` 那一行根本没有状态图标，只有未完成时的 shimmer）。
+  执行位置挂在**标题行**（`exec · workspace`），它是"这个工具在哪儿跑"的修饰。
+- **执行中显示转圈 spinner**（`UIActivityIndicatorView`），完成/失败显示静态图标。
+  静止的图标在等几秒后会被读成"卡住了"；而 spinner 只旋转、不改布局，不会在流式
+  追加时造成抖动。`prepareForReuse` 里会停掉它。
+- 状态**文字**必须保留（"Running"/"Failed"），颜色只做辅助——色盲用户与强光下
+  都要能读。完成态靠图标形状（对勾/转圈/问号）区分，同样不依赖颜色。
 - 工具标题只在补充信息时显示。上游的 `title` 经常就是整条命令而 `input` 里又有
   `command: 同一条命令`，实测三张卡有两张把同一条命令写了两遍。判定在
   `MessageListMetrics.showsToolTitle`。
@@ -90,10 +101,22 @@ Podspec 的源码范围仅 `ios/`，verification 不参与产品构建。
 
 ```sh
 pnpm test:swift        # 传到构建机的 swift 容器里编译运行，不需要模拟器
+pnpm typecheck:kit     # UIKit 文件的类型检查（本机，几秒）
 ```
 
-它跑 `verification/MessageListTests.swift` 里 `#if !canImport(UIKit)` 那一半
-（Foundation-only，用 swift-corelibs-xctest 的 runner）。当前 8 项通过。
+`test:swift` 跑 `verification/MessageListTests.swift` 里 `#if !canImport(UIKit)` 那一半
+（Foundation-only，用 swift-corelibs-xctest 的 runner）。当前 10 项通过。
+
+但**它看不见 UIKit 文件里的编译错误**——踩过两次（`let` 变量做 `+=`、把 UILabel 属性
+遮蔽成 String），都是纯逻辑测试全绿、iOS 构建才报错，代价是等一轮几分钟的 xcodebuild。
+`typecheck:kit` 补上这一环：`swiftc -typecheck` 走完整类型检查但不链接、不要模拟器，
+几秒出结果，已接进 `pnpm check`。
+
+覆盖范围有边界，别当成"Swift 都查了"：它检查 `MessageCells.swift`（六种 cell 的
+渲染逻辑，也就是上面那两个错所在），**不检查 `NativeMessageList.swift`**——那个文件
+`import ExpoModulesCore`，而 Pods 里那份预编译 xcframework 是稍旧的编译器构建的
+（SDK 6.3.1 vs 本机 6.3.3），本机 swiftc 解析不了它的 swiftinterface。列表调度那一块
+只能靠真正的 xcodebuild 兜底。
 
 UIKit 宿主部分（`testActivitySurfaceDiffersFromUserBubble`、工具卡片两行结构、
 列表虚拟化、贴底、上翻保持、回底与非法帧保留）仍是源码，
