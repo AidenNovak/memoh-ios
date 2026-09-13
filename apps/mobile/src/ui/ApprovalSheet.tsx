@@ -79,10 +79,10 @@ export function ApprovalSheet({
                 borderRadius: radius.md,
               }}
             >
-              <Text style={[typography.footnote, { color: palette.tertiaryLabel }]}>
-                {t('chat.tool')}
-              </Text>
-              <Text style={[typography.callout, { color: palette.label, marginTop: 2 }]}>
+              {/* 工具名和入参同处一个块，不再给"Tool"单开一行小标题：
+                  它只是把下面那行内容又标了一遍，多一层却没有多一个信息。
+                  消息流里那张卡片能显示同样内容，这里是给"没看见卡片"的情况兜底。 */}
+              <Text style={[typography.callout, { color: palette.label }]}>
                 {approval.toolName}
               </Text>
               {approval.toolInput !== undefined ? (
@@ -154,11 +154,37 @@ function ChoiceButton({ choice, onPress }: { choice: ApprovalChoice; onPress: ()
   );
 }
 
-/** 工具入参的展示。太长就截断——手机上没人读一千行 JSON。 */
+/**
+ * 工具入参的展示。
+ *
+ * 与原生消息卡片的入参摘要保持同一套规则（见 `modules/memoh-kit/ios/Chat/Transcript.swift`
+ * 的 `ToolInput.preview`）：**扁平对象渲染成 `key: value` 每行一条，不吐 JSON 语法**。
+ * 同一个屏幕上两处显示同一份入参却格式不一致，用户会以为看的是两件不同的事。
+ *
+ * 嵌套或数组退回 JSON——那种情况不多，也不该由半吊子的人肉格式化去猜。
+ */
 function formatInput(input: unknown): string {
+  const LIMIT = 2000;
+  const clip = (text: string) => (text.length > LIMIT ? `${text.slice(0, LIMIT)}…` : text);
   try {
-    const text = typeof input === 'string' ? input : JSON.stringify(input, null, 2);
-    return text.length > 2000 ? `${text.slice(0, 2000)}…` : text;
+    if (typeof input === 'string') return clip(input);
+
+    if (input !== null && typeof input === 'object' && !Array.isArray(input)) {
+      const entries = Object.entries(input as Record<string, unknown>);
+      const allScalar = entries.every(
+        ([, value]) => value === null || ['string', 'number', 'boolean'].includes(typeof value),
+      );
+      if (allScalar && entries.length > 0) {
+        return clip(
+          [...entries]
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([key, value]) => `${key}: ${value === null ? '' : String(value)}`)
+            .join('\n'),
+        );
+      }
+    }
+
+    return clip(JSON.stringify(input, null, 2));
   } catch {
     return String(input);
   }

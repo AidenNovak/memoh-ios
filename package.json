@@ -2,7 +2,7 @@
   "name": "memoh-ios",
   "version": "0.1.0",
   "private": true,
-  "description": "Memoh iOS \u2014 independent native iOS client for Memoh",
+  "description": "Memoh iOS — independent native iOS client for Memoh",
   "license": "AGPL-3.0-only",
   "packageManager": "pnpm@10.33.0",
   "engines": {
@@ -19,7 +19,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "pnpm typecheck && pnpm i18n:check && pnpm ternary:check && pnpm format:check",
-    "test": "pnpm --filter @memoh-ios/mobile test",
+    "test": "pnpm --filter @memoh-ios/mobile test && pnpm test:swift",
     "verify:build": "pnpm --filter @memoh-ios/mobile verify:build",
     "verify:ui": "pnpm --filter @memoh-ios/mobile verify:ui",
     "verify:native": "pnpm --filter @memoh-ios/mobile verify:native",
@@ -27,7 +27,8 @@
     "verify:clean": "pnpm --filter @memoh-ios/mobile verify:clean",
     "dev:env": "./infra/local/memoh-tunnel.sh start",
     "dev:env:stop": "./infra/local/memoh-tunnel.sh stop",
-    "ternary:check": "pnpm --filter @memoh-ios/mobile ternary:check"
+    "ternary:check": "pnpm --filter @memoh-ios/mobile ternary:check",
+    "test:swift": "bash Tools/run-logic-tests.sh"
   },
   "devDependencies": {
     "prettier": "^3.6.2",

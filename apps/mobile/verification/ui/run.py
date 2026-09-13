@@ -75,6 +75,17 @@ CASES = {
         scene='App 的真实首屏（冷启动，不注入任何 fixture）',
         timeout=180,
     ),
+    'scenes': Case(
+        name='scenes',
+        batch='scenes',
+        description='每个固定场景用真实组件渲染一张截图（不连服务端、不需要凭据）',
+        script=CASES_DIR / 'scenes.py',
+        # 这条 case 自己按场景 × 外观出图，所以不声明固定截图名；
+        # 它的产物是 `<scene>-<appearance>.png` 一整套。
+        screenshots=(),
+        scene='固定帧序列回放：工具状态、思考分层、审批、失败、长会话、断连、附件',
+        timeout=900,
+    ),
     'chat-roundtrip': Case(
         name='chat-roundtrip',
         batch='live',
@@ -89,6 +100,7 @@ CASES = {
 }
 BATCHES = {
     'launch': ['app-launch'],
+    'scenes': ['scenes'],
     'live': ['chat-roundtrip'],
 }
 

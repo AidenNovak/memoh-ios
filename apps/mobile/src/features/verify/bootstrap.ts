@@ -29,6 +29,22 @@ export async function bootstrapFromVerifySeed(): Promise<VerifyBootstrap | null>
   const verifySeed = loadVerifySeed();
   if (verifySeed === null) return null;
 
+  // 场景模式**不碰网络**。
+  //
+  // 场景的数据是本地注入的帧，跟服务端没关系，所以没有理由为了看一个错误态
+  // 去登录一次。这条很重要：它让"看设计"摆脱对服务端、隧道和凭据的依赖——
+  // CI 里没有服务器也能跑，网断了也能跑。
+  //
+  // 这里给的 client 永远不会被调用：外壳需要它才能挂载 SessionProvider，而
+  // SessionProvider 只是持有它、不主动发请求。真发出去会连不上，这正好暴露
+  // "场景模式不该联网"这条约束被破坏了。
+  if (verifySeed.scenario === 'scene' && typeof verifySeed.scene === 'string') {
+    return {
+      seed: { client: new Client({ baseUrl: 'http://scene.invalid', getToken: () => null }) },
+      plan: verifySeed,
+    };
+  }
+
   let token: string | null = null;
   const client = new Client({ baseUrl: verifySeed.baseUrl, getToken: () => token });
 

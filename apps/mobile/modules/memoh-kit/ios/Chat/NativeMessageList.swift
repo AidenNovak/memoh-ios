@@ -3,10 +3,16 @@ import UIKit
 
 private final class MessageCollectionView: UICollectionView {
   var didLayout: (() -> Void)?
+  var willAccessibilityScroll: (() -> Void)?
 
   override func layoutSubviews() {
     super.layoutSubviews()
     didLayout?()
+  }
+
+  override func accessibilityScroll(_ direction: UIAccessibilityScrollDirection) -> Bool {
+    willAccessibilityScroll?()
+    return super.accessibilityScroll(direction)
   }
 }
 
@@ -28,6 +34,12 @@ final class NativeMessageList: ExpoView, UICollectionViewDelegate {
   private var updateScheduled = false
   private var lastSize = CGSize.zero
   private var decodeFailed = false
+  private var expansion = ReasoningExpansionState()
+  private var expansionUpdates = Set<TranscriptRow.ID>()
+  private var readingAnchor: (TranscriptRow.ID, CGFloat)?
+  private var interactionRevision = 0
+  private var restoringAnchor = false
+  private var pendingRows: [TranscriptRow]?
 
   required init(appContext: AppContext? = nil) {
     let layout = UICollectionViewCompositionalLayout { _, _ in
@@ -35,7 +47,7 @@ final class NativeMessageList: ExpoView, UICollectionViewDelegate {
       let item = NSCollectionLayoutItem(layoutSize: size)
       let group = NSCollectionLayoutGroup.vertical(layoutSize: size, subitems: [item])
       let section = NSCollectionLayoutSection(group: group)
-      section.interGroupSpacing = 12
+      section.interGroupSpacing = CGFloat(MessageListMetrics.blockSpacing)
       section.contentInsets = .init(top: 16, leading: 16, bottom: 16, trailing: 16)
       return section
     }
@@ -60,9 +72,14 @@ final class NativeMessageList: ExpoView, UICollectionViewDelegate {
     }
     source = UICollectionViewDiffableDataSource<Int, TranscriptRow.ID>(collectionView: collection) {
       [weak self] collection, path, id in
-      guard let row = self?.rows[id] else { return nil }
+      guard let self, let row = self.rows[id] else { return nil }
       let cell = collection.dequeueReusableCell(withReuseIdentifier: id.kind.rawValue, for: path)
-      (cell as? MessageBlockCell)?.configure(row)
+      if let reasoning = cell as? ReasoningMessageCell {
+        reasoning.configure(row, expanded: self.expansion.isExpanded(id))
+        reasoning.onToggle = { [weak self] in self?.toggleReasoning(id) }
+      } else {
+        (cell as? MessageBlockCell)?.configure(row)
+      }
       return cell
     }
     emptyLabel.numberOfLines = 0
@@ -72,10 +89,21 @@ final class NativeMessageList: ExpoView, UICollectionViewDelegate {
     emptyLabel.textColor = .secondaryLabel
     collection.backgroundView = emptyLabel
 
-    var buttonConfiguration = UIButton.Configuration.tinted()
+    var buttonConfiguration = UIButton.Configuration.filled()
+    buttonConfiguration.baseBackgroundColor = .secondarySystemBackground
+    buttonConfiguration.baseForegroundColor = .systemBlue
     buttonConfiguration.image = UIImage(systemName: "arrow.down")
+    buttonConfiguration.title = MemohStrings.text("Back to bottom")
+    buttonConfiguration.imagePadding = 8
+    buttonConfiguration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+      var result = attributes
+      result.font = .preferredFont(forTextStyle: .subheadline)
+      return result
+    }
     buttonConfiguration.cornerStyle = .capsule
     bottomButton.configuration = buttonConfiguration
+    bottomButton.titleLabel?.adjustsFontForContentSizeCategory = true
+    bottomButton.titleLabel?.numberOfLines = 0
     bottomButton.tintColor = .systemBlue
     bottomButton.accessibilityLabel = MemohStrings.text("Back to bottom")
     bottomButton.accessibilityIdentifier = "messages-back-to-bottom"
@@ -84,20 +112,22 @@ final class NativeMessageList: ExpoView, UICollectionViewDelegate {
     addSubview(bottomButton)
     NSLayoutConstraint.activate([
       bottomButton.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor, constant: -16),
+      bottomButton.leadingAnchor.constraint(greaterThanOrEqualTo: safeAreaLayoutGuide.leadingAnchor, constant: 16),
       bottomButton.bottomAnchor.constraint(equalTo: safeAreaLayoutGuide.bottomAnchor, constant: -12),
       bottomButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 44),
       bottomButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
     ])
     bottomButton.isHidden = true
     collection.didLayout = { [weak self] in
-      guard let self, self.following, !self.applying,
-            !self.collection.isDragging, !self.collection.isDecelerating else { return }
+      guard let self, !self.applying, !self.isInteracting else { return }
       // Estimated heights settle over more than one layout pass, especially on first load.
-      self.pinBottom()
+      if self.following { self.pinBottom() } else { self.restoreReadingAnchor() }
     }
+    collection.willAccessibilityScroll = { [weak self] in self?.beginReading() }
     registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) {
       (view: NativeMessageList, _: UITraitCollection) in
       view.collection.collectionViewLayout.invalidateLayout()
+      view.bottomButton.setNeedsUpdateConfiguration()
       view.setNeedsLayout()
     }
   }
@@ -152,12 +182,19 @@ final class NativeMessageList: ExpoView, UICollectionViewDelegate {
   }
 
   private func apply(_ incoming: [TranscriptRow]) {
+    // A decode can finish while a disclosure-triggered snapshot is still applying.
+    guard !applying else { pendingRows = incoming; return }
     let old = source.snapshot()
     let ids = incoming.map(\.id)
     let next = Dictionary(uniqueKeysWithValues: incoming.map { ($0.id, $0) })
-    let changed = ids.filter { rows[$0] != nil && rows[$0] != next[$0] }
+    expansionUpdates.formIntersection(ids)
+    let changed = ids.filter { rows[$0] != nil && (rows[$0] != next[$0] || expansionUpdates.contains($0)) }
     guard old.itemIdentifiers != ids || !changed.isEmpty else { return }
     let anchor = visibleAnchor()
+    let revision = interactionRevision
+    expansion.retain(ids)
+    expansionUpdates.removeAll()
+    readingAnchor = nil
     rows = next
     var snapshot = NSDiffableDataSourceSnapshot<Int, TranscriptRow.ID>()
     snapshot.appendSections([0])
@@ -170,16 +207,64 @@ final class NativeMessageList: ExpoView, UICollectionViewDelegate {
       self.collection.layoutIfNeeded()
       if self.following {
         self.pinBottom()
-      } else if let (id, distance) = anchor,
-                let path = self.source.indexPath(for: id),
-                let frame = self.collection.layoutAttributesForItem(at: path)?.frame {
-        // Preserve the actual reading anchor, including history prepends and resized rows above it.
-        self.collection.contentOffset.y = frame.minY - distance
+      } else if MessageListMetrics.canRestoreAnchor(capturedRevision: revision,
+                  currentRevision: self.interactionRevision, isInteracting: self.isInteracting) {
+        // Never restore an anchor captured before a new user gesture or disclosure action.
+        self.readingAnchor = anchor
+        self.restoreReadingAnchor()
       }
       self.applying = false
-      self.bottomButton.isHidden = self.following || self.rows.isEmpty
+      self.updateBottomButton()
+      if let pending = self.pendingRows {
+        self.pendingRows = nil
+        self.apply(pending)
+      } else {
+        self.refreshExpansionIfNeeded()
+      }
       self.scheduleUpdate()
     }
+  }
+
+  private func toggleReasoning(_ id: TranscriptRow.ID) {
+    guard rows[id]?.block.kind == .reasoning else { return }
+    // Expanding content is an explicit reading action, even if the list was following.
+    beginReading()
+    expansion.toggle(id)
+    expansionUpdates.insert(id)
+    refreshExpansionIfNeeded()
+  }
+
+  private func refreshExpansionIfNeeded() {
+    guard !applying, !expansionUpdates.isEmpty else { return }
+    apply(source.snapshot().itemIdentifiers.compactMap { rows[$0] })
+  }
+
+  private var isInteracting: Bool {
+    collection.isDragging || collection.isDecelerating || collection.isTracking
+  }
+
+  private func beginReading() {
+    interactionRevision += 1
+    following = false
+    readingAnchor = nil
+    updateBottomButton()
+  }
+
+  private func updateBottomButton() {
+    bottomButton.isHidden = following || rows.isEmpty
+  }
+
+  private func restoreReadingAnchor() {
+    guard !restoringAnchor, !isInteracting, let (id, distance) = readingAnchor,
+          let path = source.indexPath(for: id),
+          let frame = collection.layoutAttributesForItem(at: path)?.frame else { return }
+    let offset = CGFloat(MessageListMetrics.anchoredOffset(
+      itemTop: Double(frame.minY), distance: Double(distance),
+      topInset: Double(collection.adjustedContentInset.top), bottomOffset: Double(bottomOffset)))
+    guard abs(collection.contentOffset.y - offset) > 0.5 else { return }
+    restoringAnchor = true
+    collection.contentOffset.y = offset
+    restoringAnchor = false
   }
 
   private func visibleAnchor() -> (TranscriptRow.ID, CGFloat)? {
@@ -194,17 +279,20 @@ final class NativeMessageList: ExpoView, UICollectionViewDelegate {
   }
 
   private var bottomOffset: CGFloat {
-    max(-collection.adjustedContentInset.top,
-        collection.contentSize.height - collection.bounds.height + collection.adjustedContentInset.bottom)
+    CGFloat(MessageListMetrics.bottomOffset(
+      contentHeight: Double(collection.contentSize.height), viewportHeight: Double(collection.bounds.height),
+      topInset: Double(collection.adjustedContentInset.top), bottomInset: Double(collection.adjustedContentInset.bottom)))
   }
 
   private func pinBottom(force: Bool = false) {
-    guard force || (!collection.isDragging && !collection.isDecelerating) else { return }
+    guard force || !isInteracting else { return }
     guard abs(collection.contentOffset.y - bottomOffset) > 0.5 else { return }
     collection.setContentOffset(CGPoint(x: 0, y: bottomOffset), animated: false)
   }
 
   @objc private func returnToBottom() {
+    interactionRevision += 1
+    readingAnchor = nil
     following = true
     pinBottom(force: true)
     bottomButton.isHidden = true
@@ -212,18 +300,36 @@ final class NativeMessageList: ExpoView, UICollectionViewDelegate {
 
   func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
     // Disengage immediately so a concurrent stream cannot fight the finger.
-    following = false
+    beginReading()
   }
 
   func scrollViewDidScroll(_ scrollView: UIScrollView) {
-    guard !applying else { return }
     if scrollView.isDragging || scrollView.isDecelerating || scrollView.isTracking {
-      following = bottomOffset - scrollView.contentOffset.y <= 24
-      bottomButton.isHidden = following || rows.isEmpty
+      // Also process gestures during a diffable update; don't re-engage mid-gesture.
+      beginReading()
       let atTop = scrollView.contentOffset.y <= -scrollView.adjustedContentInset.top + 44
       if atTop && !reachedTop && !rows.isEmpty { onReachTop([:]) }
       reachedTop = atTop
     }
+  }
+
+  func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+    if !decelerate { finishReadingGesture() }
+  }
+
+  func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) { finishReadingGesture() }
+
+  func scrollViewShouldScrollToTop(_ scrollView: UIScrollView) -> Bool {
+    beginReading()
+    return true
+  }
+
+  private func finishReadingGesture() {
+    interactionRevision += 1
+    following = MessageListMetrics.isNearBottom(offset: Double(collection.contentOffset.y), bottomOffset: Double(bottomOffset))
+    readingAnchor = following ? nil : visibleAnchor()
+    updateBottomButton()
+    if following && !applying { pinBottom() }
   }
 
   private func updateEmptyState() {

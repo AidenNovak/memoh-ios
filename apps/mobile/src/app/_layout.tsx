@@ -14,7 +14,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AuthGate } from '../features/auth/AuthGate.tsx';
 import { SessionProvider } from '../features/session/store.tsx';
-import { VerifyPlanRunner } from '../features/verify/VerifyPlanRunner.tsx';
+import { ScenePlanWatcher, VerifyPlanRunner } from '../features/verify/VerifyPlanRunner.tsx';
 import { useLocale } from '../lib/i18n/useLocale.ts';
 import { ThemeProvider, useTheme } from '../lib/theme/context.tsx';
 
@@ -59,6 +59,7 @@ function ThemedRoot() {
           <View style={{ flex: 1, backgroundColor: palette.groupedBackground }}>
             <SessionProvider seed={seed}>
               <VerifyPlanRunner verify={verify} />
+              <ScenePlanWatcher verify={verify} />
               <Stack
                 screenOptions={{
                   headerShown: false,

@@ -114,6 +114,14 @@ class Driver:
     def container(self, kind='data'):
         return Path(self.simctl('get_app_container', self.udid, self.bundle_id, kind).stdout.strip())
 
+    def open_url(self, url):
+        """Deep-link into the *running* app.
+
+        比起重新启动，deep link 有两个好处：一是快（一次启动可以看很多状态），
+        二是它走的是真实的路由解析，所以顺带验证了路由本身配对了。
+        """
+        self.simctl('openurl', self.udid, url, timeout=60)
+
     def set_appearance(self, appearance):
         self.simctl('ui', self.udid, 'appearance', appearance)
 

@@ -14,14 +14,33 @@ import { useRouter } from 'expo-router';
 
 import { createdSessionId } from '../../api/types.ts';
 import type { VerifyBootstrap } from './bootstrap.ts';
+import { watchVerifyScene } from './seed.ts';
 import { useSession } from '../session/store.tsx';
 
 export function VerifyPlanRunner({ verify }: { verify: VerifyBootstrap | null }) {
   const { state, selectBot, openSession, sendMessage } = useSession();
   const router = useRouter();
   const started = useRef(false);
+  /**
+   * 场景模式：本地帧回放，跟服务端无关。
+   *
+   * 必须排在"等 bot 列表到位"之前——场景模式下 client 指向一个不存在的地址，
+   * `state.bots` 永远是空的，排在后面就永远进不去。这个顺序是踩过的坑。
+   */
+  const sceneMode =
+    verify?.plan?.scenario === 'scene' && typeof verify.plan.scene === 'string'
+      ? verify.plan.scene
+      : null;
 
   useEffect(() => {
+    if (sceneMode !== null) {
+      if (started.current) return;
+      started.current = true;
+      // `replace` 而不是 `push`：场景台是这一趟的目的地，不是从首页点进去的下一层。
+      router.replace(`/debug/scene/${sceneMode}`);
+      return;
+    }
+
     if (verify === null || verify.plan === null) return;
     if (started.current) return;
     // 等 bot 列表到位再动手。
@@ -66,6 +85,7 @@ export function VerifyPlanRunner({ verify }: { verify: VerifyBootstrap | null })
       }
     })();
   }, [
+    sceneMode,
     verify,
     state.bots,
     state.sessions,
@@ -75,6 +95,28 @@ export function VerifyPlanRunner({ verify }: { verify: VerifyBootstrap | null })
     sendMessage,
     router,
   ]);
+
+  return null;
+}
+
+/**
+ * 场景模式下跟着种子文件切场景（仅开发构建）。
+ *
+ * 单独一个组件而不是塞进 `VerifyPlanRunner`：那个组件的 effect 依赖一堆 store 状态
+ * （bots / sessions / client），每次它们变化都会重跑 effect；而场景切换只依赖一个
+ * 文件，两者生命周期不同。分开以后场景切换也不受 store 刷新影响。
+ */
+export function ScenePlanWatcher({ verify }: { verify: VerifyBootstrap | null }) {
+  const router = useRouter();
+  const plan = verify?.plan ?? null;
+  const isSceneMode = plan?.scenario === 'scene';
+
+  useEffect(() => {
+    if (plan === null || !isSceneMode || plan.scene === undefined) return;
+    return watchVerifyScene(plan, (sceneId) => {
+      router.replace(`/debug/scene/${sceneId}`);
+    });
+  }, [plan, isSceneMode, router]);
 
   return null;
 }

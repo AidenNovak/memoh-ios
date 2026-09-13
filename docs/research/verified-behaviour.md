@@ -129,6 +129,32 @@ ERROR: resolve: chat model deepseek-v4-flash is disabled
 在第二次跑的时候直接进了主界面，看起来像 App 坏了。现在每个 case 开头都
 `xcrun simctl keychain reset`。
 
+## 9b. `simctl openurl` 在 iOS 26 上会弹系统确认框（deep link 用不了）
+
+**不是探针，是踩坑**：想用 `memoh:///debug/scene/<id>` 深链切换验收场景，结果每张
+截图都带着一个系统弹窗——**而场景压根没切过去**：
+
+```
+Open in "Memoh"?
+Cancel        Open
+```
+
+它**两种情况都会弹**：App 已在前台时弹；先 `terminate` 再 openurl（冷开）照样弹。
+所以这不是"先关掉 App 就行"的问题。
+
+**为什么致命**：这个项目没有点击能力（第 8 条），弹窗没人能点，于是"用 deep link
+切场景"这条路直接堵死，截图还被弹窗污染成验收垃圾。
+
+**改用什么**：让验收脚本直接改 App 沙箱里的种子文件，App 轮询它
+（`src/features/verify/seed.ts` 的 `watchVerifyScene`）。好处不只是绕过弹窗：
+
+- 不需要冷启动——一次启动看完全部场景，省掉十几次重启；
+- 切换是确定的，没有"弹窗会不会出现"这种赌博；
+- 仍然走真实路由与真实组件，省掉的只是"从外部唤起"这一步。
+
+**写入必须原子**：脚本先写临时文件再 `replace()`。App 每 600ms 读一次，直接覆写
+可能让它读到半截 JSON——"半截文件"是最难查的一类间歇失败。
+
 ---
 
 ## 怎么加一条记录
@@ -231,3 +257,51 @@ run 落盘为 `state=failed, error_code=agent.response_interrupted`；客户端�
 
 `tools/approval-flow.mjs` 就是这么做的，并且会在结束时**恢复原设置**——
 留下一个"每个工具都要审批"的配置会让其他验收莫名卡住。
+
+## 15. 工具失败不是任务失败（上游的明确规则）
+
+**来源**：上游 Web 客户端源码，`apps/web/src/pages/home/components/tool-call-inline.vue:225`。
+这不是我的推断，是产品方自己写下的规则：
+
+> 工具标题是执行过程摘要。Agent 在虚拟机中试错、检查并修复命令是正常的
+> 长任务行为；非零退出码（包括 -1）或工具 isError 不等于用户任务失败。
+> 标题保持中性色，不附加退出码或错误染色；诊断留在展开详情中，真正的
+> 任务失败由回合级错误反馈表达，不能从某一次工具调用推导。
+
+**协议层面**：`internal/agent/view/uimessage.go:58` 的 `UIMessage` 只有
+`running *bool`，**没有** `is_error` / `status` 字段。所以"这个工具失败了"在传输层
+根本不存在——只有"跑完了"和"还在跑"。
+
+**那 Web 端怎么显示错误？** `apps/web/src/pages/home/components/tool-result-error.ts`：
+
+```
+result.isError === true || result.structuredContent.isError === true
+```
+
+即**从 output 对象内部**读，而且只在 `done` 之后。注意 `exit_code !== 0` 只被用来
+显示退出码（`tool-call-detail-exec.vue`），**不当作失败**。
+
+**落到我们的实现**：
+
+- `toolStatusFrom` 把 `running:false` 一律映射成 `done` —— 这**是对的**，不是 bug。
+- 工具行的标题**不着色**。把工具行染红会让正常试错看起来像事故，还会把真正该注意的
+  回合级错误淹掉。
+- 服务端明确发的 `type: 'error'` 消息块是另一回事，那个该醒目——它是回合级的错误反馈。
+
+**一条容易搞反的**：验收场景里"工具的 output 写着构建失败"不能推断成"这个任务失败了"。
+要断言任务失败，看 run 的终态（`errored`），不要看某一次工具调用的输出内容。
+
+---
+
+## 16. 上游会延迟 250ms 才显示"运行中"
+
+**来源**：同上文件，`RUNNING_SHIMMER_DELAY_MS = 250`。注释写得很清楚：
+
+> Brief tools (e.g. send/memory) finish in <100ms. Showing the running shimmer
+> for them flickers, so we only display it after a short delay.
+
+**我没有跟着做**，理由要写清楚，免得后来的人以为漏了：他们延迟的是**循环动画**
+（shimmer），一个持续闪动的效果闪一下就非常显眼。我们用的是静态图标 + 文字
+（"Running"/"Done"），快工具只是文字换一次，一帧的事，不值得为它引入一套
+逐行的延迟计时器——那反而是抖动和状态错乱的来源。如果以后把 running 换成动画，
+这条就得重新考虑。
