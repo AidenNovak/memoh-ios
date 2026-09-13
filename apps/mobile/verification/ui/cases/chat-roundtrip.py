@@ -172,13 +172,16 @@ def main(argv=None):
         driver.terminate()
         driver.launch(launch_arguments(arguments.metro_port, arguments.language))
 
-        # 1) 首页。种子里有凭据，所以这里应该直接进主界面而不是登录页。
-        #    注意：wait_for_text 的 capture_name 只写 .txt；声明的截图证据要的是真
-        #    PNG，所以每一步都要再 capture 一次。
-        driver.wait_for_text(('Sessions',), timeout=150)
-        driver.capture('home')
+        # 1) 证明已经登录进主界面。
+        #
+        #    注意：验收脚本（`src/features/verify/`）会在登录后**自动跳到对话页**，
+        #    跳转可能发生在第一次轮询之前。所以这里接受"首页或对话页"任意一个，
+        #    断言的是"过了登录页"这件事，而不是"停在首页"——后者依赖跳转的时机，
+        #    是个会随机失败的断言。
+        driver.wait_for_text(('Sessions', 'Message'), timeout=150)
+        driver.capture('entered')
 
-        # 2) 对话页。脚本会把界面推到 /chat/<id>。
+        # 2) 对话页。
         driver.wait_for_text(('Message',), timeout=90)
         driver.capture('composer')
 

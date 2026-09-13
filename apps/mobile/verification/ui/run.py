@@ -81,7 +81,7 @@ CASES = {
         description='连真实 Memoh 服务端跑完一轮对话：登录 → 会话 → 发送 → 收到流式回复',
         script=CASES_DIR / 'chat-roundtrip.py',
         # 每一步都留证据：首页、输入器、回复、稳定态。
-        screenshots=('home', 'composer', 'reply', 'settled'),
+        screenshots=('entered', 'composer', 'reply', 'settled'),
         scene='真实服务端往返（需要 pnpm dev:env 隧道 + 服务器上已配好 bot 与模型）',
         timeout=600,
         requires_live=True,
