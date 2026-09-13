@@ -23,6 +23,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ApiError, MemohClient } from '../api/client.ts';
 import { getFreshToken, saveSession } from '../api/credentials.ts';
 import { useT } from '../lib/i18n/useT.ts';
+import { radiusStyle, spacing as space, typography as type } from '../lib/theme/tokens.ts';
 import { usePalette, useTheme } from '../lib/theme/context.tsx';
 import type { SessionSeed } from '../features/session/store.tsx';
 
@@ -115,18 +116,46 @@ export function LoginScreen({
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={[typography.largeTitle, { color: palette.label, marginBottom: spacing.xs }]}>
+        {/* 品牌标记。Lody 的引导页在这里放 app icon（64×64，连续圆角）。
+            我们没有图标资源，用一个文字标记代替——重点是**给这一屏一个视觉锚点**，
+            否则「大标题 + 两个输入框」看起来像没做完。 */}
+        <View
+          style={{
+            width: 64,
+            height: 64,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: palette.accent,
+            alignSelf: 'center',
+            marginBottom: spacing.xxl,
+            ...radiusStyle(15),
+          }}
+        >
+          <Text style={{ color: palette.onAccent, fontSize: 28, fontWeight: '700' }}>M</Text>
+        </View>
+
+        <Text
+          style={[
+            typography.largeTitle,
+            { color: palette.label, textAlign: 'center', marginBottom: spacing.sm },
+          ]}
+        >
           {t('login.title')}
         </Text>
-        <Text style={[typography.subhead, { color: palette.secondaryLabel, marginBottom: 28 }]}>
+        <Text
+          style={[
+            typography.subhead,
+            { color: palette.secondaryLabel, textAlign: 'center', marginBottom: spacing.xxl },
+          ]}
+        >
           {t('login.subtitle')}
         </Text>
 
         <View
           style={{
             backgroundColor: palette.card,
-            borderRadius: radius.md,
             overflow: 'hidden',
+            ...radiusStyle(radius.md),
           }}
         >
           <FormRow
@@ -177,19 +206,19 @@ export function LoginScreen({
             styles.submit,
             {
               backgroundColor: canSubmit ? palette.accent : palette.field,
-              borderRadius: radius.md,
-              marginTop: spacing.xl,
+              marginTop: spacing.xxl,
               opacity: pressed ? 0.85 : 1,
+              ...radiusStyle(radius.pill),
             },
           ]}
         >
           {busy ? (
-            <ActivityIndicator color="#FFFFFF" />
+            <ActivityIndicator color={palette.onAccent} />
           ) : (
             <Text
               style={[
                 typography.headline,
-                { color: canSubmit ? '#FFFFFF' : palette.tertiaryLabel },
+                { color: canSubmit ? palette.onAccent : palette.tertiaryLabel },
               ]}
             >
               {t('login.submit')}

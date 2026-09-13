@@ -15,6 +15,12 @@
 "Expanded" = "Expanded";
 "Collapsed" = "Collapsed";
 "Tool" = "Tool";
+"Read files" = "Read files";
+"Edited files" = "Edited files";
+"Ran commands" = "Ran commands";
+"Fetched from the web" = "Fetched from the web";
+"Used tools" = "Used tools";
+", " = ", ";
 "Error code" = "Error code";
 "Notice" = "Notice";
 "Untitled attachment" = "Untitled attachment";

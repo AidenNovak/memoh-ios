@@ -34,32 +34,32 @@ import { NativeMessageList } from '@memoh-ios/kit';
   文本、思考、工具摘要、错误、通知和附件名称均可显示。助手全宽左对齐；用户右对齐、
   最宽 78%，采用系统语义背景与文本色，不沿用 Web 品牌紫。
 - **表面的分工**：用户气泡用 `.secondarySystemBackground`（实心，你说的话是实体），
-  agent 的机器活动卡片（工具／思考／附件）用 `.tertiarySystemBackground`（容器，
+  agent 的机器活动卡片（思考／附件）用 `.tertiarySystemBackground`（容器，
   装着机器活动）。两者**必须不同**——曾经用同一种灰，实测一张工具场景截图里那种灰
   占了 49% 的像素，整屏没有层级。政策由 `MessageListMetrics.{userSurface,activitySurface}`
   表达，颜色映射只在 `MessageBlockCell.color(for:)` 一处。层级靠形态区分，不靠第三个
   灰阶：浅色模式里根本没有第三个能和页面分开的灰。
-- **工具出错不着色**。上游把这条写成了明确规则（`tool-call-inline.vue:225`）：
-  工具试错是正常的长任务行为，非零退出码或 `isError` 不等于任务失败，真正的失败
-  由回合级错误反馈表达。把工具行染红会让正常试错看起来像事故。诊断信息照常显示，
-  只是不用颜色替用户下结论。见 `docs/research/verified-behaviour.md` 第 15 条。
-- 工具卡片两行：`<工具名> <状态 · 执行位置>` 然后入参。工具名是 headline（主体），
-  状态是 subheadline + 次要色（它的修饰）——曾经两者都是 headline 且各占一行，
-  分不清哪个是主体。
-- **状态词与状态图标只在需要说明时出现**：`running`（用户正等着）与 `failed`
-  （服务端说这条出错了）。`done` 与 `unknown` **不贴标签、也不给图标**——
-  所有工具都会完成，给每一个都贴 "Done" 是一屏重复十几次的噪声；
-  而一枚对勾等于在断言"这次调用成功了"，与"不能从一次工具调用推导成败"相冲
-  （上游 `tool-call-inline.vue` 那一行根本没有状态图标，只有未完成时的 shimmer）。
-  执行位置挂在**标题行**（`exec · workspace`），它是"这个工具在哪儿跑"的修饰。
-- **执行中显示转圈 spinner**（`UIActivityIndicatorView`），完成/失败显示静态图标。
-  静止的图标在等几秒后会被读成"卡住了"；而 spinner 只旋转、不改布局，不会在流式
-  追加时造成抖动。`prepareForReuse` 里会停掉它。
-- 状态**文字**必须保留（"Running"/"Failed"），颜色只做辅助——色盲用户与强光下
-  都要能读。完成态靠图标形状（对勾/转圈/问号）区分，同样不依赖颜色。
-- 工具标题只在补充信息时显示。上游的 `title` 经常就是整条命令而 `input` 里又有
-  `command: 同一条命令`，实测三张卡有两张把同一条命令写了两遍。判定在
-  `MessageListMetrics.showsToolTitle`。
+- **连续工具聚合成一条活动行，不再逐条做卡片**（Lody 规格 §2.2、§7.3）。
+  `TranscriptDisplayRow.grouped` 在解码后、后台任务内投影；同一 turn/message/role 内
+  连续 tool 合并，任何非 tool 块都会打断。`TranscriptRow` / `BlockKind` 桥接契约不变。
+  `ToolActivityGroup` 保存全部原始行，以首个 block 的完整 ID 做 diffable 身份；追加
+  工具或非首个工具的 input/output/status 更新都参与相等性比较，不会漏刷新。
+- 工具行全宽、透明、无边框，文字 `.footnote` + `.secondaryLabel`，随 Dynamic Type
+  缩放；通常一行，辅助字号允许自然折行。图标表达**类型而非状态**：读取、编辑、
+  执行、网络、其他；混合用工具图标。类别按首次出现去重，最多三类，中文顿号连接。
+  名称忽略大小写按 read/list/search → write/edit/patch/apply → exec/bash/shell/
+  command/terminal → fetch/web/http 的顺序匹配，重叠名称按此前后优先级判定。
+- 任一工具 running 时右侧显示一个 `UIActivityIndicatorView`，其余状态停掉；预留
+  20pt 槽位避免完成时文字重新换行，`prepareForReuse` 必须停动画。视觉上不写
+  Running/Done/Failed，不给完成对勾；VoiceOver 的 value 仍会读「运行中」。
+- **工具出错不改措辞、不着色**。非零退出码或 `isError` 不等于任务失败，真正失败
+  仍由独立 error 块表达（`verified-behaviour.md` 第 15 条，优先于 Lody 的失败配色）。
+  诊断沿用 `ToolResultDiagnosis.read`，只进入无障碍描述，不在活动行显示。
+- 暂无点击/展开/跳转。整组保留 `message-block-<首个 blockKey>` 标识，VoiceOver
+  label 含全部工具的名字、执行位置、标题、入参摘要与诊断；原始 input/output 不丢。
+  不从任意 input 猜文件变更数，编辑类统一「编辑了文件」，路径/diff 留待详情功能。
+  旧 `ToolState` 与 `MessageListMetrics` 工具卡片政策保留兼容及原有逻辑测试，
+  **不再驱动聚合行的视觉状态**。
 - 用户气泡上**不写** "You"：右对齐 + 实心气泡已经说明是谁，贴一个 headline 字号的
   "You" 会比用户自己写的话还显眼。屏幕阅读器仍会念角色。
 - 复合标识包含 turn、message、role、block 和 kind，不包含文本/时间/高度。
@@ -73,10 +73,10 @@ import { NativeMessageList } from '@memoh-ios/kit';
   回底按钮。历史前插/上方高度变化时恢复首个可见 item 的相对位置。估算高度后续
   收敛及容器变化也会重新贴底；跟随期间不播放滚动动画，不抢正在拖动的手势。
 - Dynamic Type 使用 preferredFont 与自动字号更新，所有颜色用 UIColor 语义色。
-  VoiceOver 标签包含角色和内容；工具状态用文字，不仅靠颜色。原生静态文案资源
+  VoiceOver 标签包含角色和内容；工具运行状态用 value 文字，视觉用 spinner。原生静态文案资源
   随模块提供中英两种语言，空态文案由宿主现有 i18n 传入。
-- 工具入参已展示（扁平对象摊成 `key: value`，嵌套退回紧凑 JSON，按 600 字符 /
-  5 行截断）；**output 仍不展示**；附件不下载/预览；思考可展开收起。不含完整
+- 工具入参摘要仅保留在 VoiceOver（扁平对象摊成 `key: value`，嵌套退回紧凑 JSON，
+  按 600 字符截断）；**output 不在视觉上展示**；附件不下载/预览；思考可展开收起。不含完整
   Markdown、高亮、diff、文本选择菜单或工具交互。这些应分别扩展对应 cell，
   不加入列表调度器。
 
@@ -105,7 +105,8 @@ pnpm typecheck:kit     # UIKit 文件的类型检查（本机，几秒）
 ```
 
 `test:swift` 跑 `verification/MessageListTests.swift` 里 `#if !canImport(UIKit)` 那一半
-（Foundation-only，用 swift-corelibs-xctest 的 runner）。当前 10 项通过。
+（Foundation-only，用 swift-corelibs-xctest 的 runner）。当前 17 项通过：原有 10 项未改，
+新增聚合边界、分类、混合措辞上限、运行状态、中性色与原始数据/稳定身份检查。
 
 但**它看不见 UIKit 文件里的编译错误**——踩过两次（`let` 变量做 `+=`、把 UILabel 属性
 遮蔽成 String），都是纯逻辑测试全绿、iOS 构建才报错，代价是等一轮几分钟的 xcodebuild。
@@ -118,7 +119,8 @@ pnpm typecheck:kit     # UIKit 文件的类型检查（本机，几秒）
 （SDK 6.3.1 vs 本机 6.3.3），本机 swiftc 解析不了它的 swiftinterface。列表调度那一块
 只能靠真正的 xcodebuild 兜底。
 
-UIKit 宿主部分（`testActivitySurfaceDiffersFromUserBubble`、工具卡片两行结构、
+UIKit 宿主部分（`testActivitySurfaceDiffersFromUserBubble`、工具聚合行样式/无障碍/复用、
+非首个工具结束时列表刷新、
 列表虚拟化、贴底、上翻保持、回底与非法帧保留）仍是源码，
 **尚未接入 XCTest target**。后续应通过 config plugin/测试工程接入已链接
 MemohKit 和 ExpoModulesCore 的 iOS hosted XCTest target（不要只手改生成工程）。

@@ -14,17 +14,17 @@ final class MessageListTests: XCTestCase {
     let failed = try XCTUnwrap(TranscriptRow.decode(MessageListLogicTests.transcript(
       #"[{"key":"tool","kind":"tool","name":"exec","status":"failed","input":{"command":"pytest"},"error":"Permission denied"}]"#)).first)
     tool.configure(failed)
-    // 工具名是标题；状态跟在后面（同一行），不与它抢层级。
-    XCTAssertEqual(tool.heading.text, "exec")
-    XCTAssertEqual(tool.stateLabel.text, MemohStrings.text("Failed"))
+    // 聚合行只显示活动措辞；原始名字、入参与诊断留在无障碍内容里。
+    XCTAssertEqual(tool.heading.text, MemohStrings.text("Ran commands"))
+    XCTAssertNil(tool.accessibilityValue)
     XCTAssertNotNil(tool.symbol.image)
     XCTAssertTrue(tool.accessibilityLabel?.contains("pytest") == true)
     XCTAssertTrue(tool.accessibilityLabel?.contains("Permission denied") == true)
     let done = try XCTUnwrap(TranscriptRow.decode(MessageListLogicTests.transcript(
       #"[{"key":"tool","kind":"tool","name":"exec","status":"done"}]"#)).first)
     tool.configure(done)
-    XCTAssertTrue(tool.stateLabel.isHidden, "完成态不贴状态词")
-    XCTAssertTrue(tool.symbol.isHidden, "完成态不给图标")
+    XCTAssertNil(tool.accessibilityValue, "完成态不贴状态词")
+    XCTAssertFalse(tool.symbol.isHidden, "类型图标不是成功标记，完成时仍保留")
     XCTAssertFalse(tool.accessibilityLabel?.contains("Permission denied") == true)
     XCTAssertFalse(tool.accessibilityLabel?.contains("pytest") == true)
 
@@ -168,38 +168,223 @@ final class MessageListTests: XCTestCase {
     XCTAssertGreaterThan(user.cgColor.alpha, 0.9, "用户气泡必须是实心的：用户说的话是实体")
   }
 
-  /**
-   工具卡片的两行结构：工具名（标题）+ 状态（同一行的修饰）。
-
-   之前"Running"和工具名各占一行、都是 headline 字号，于是状态和它修饰的东西一样
-   重。这里钉住新的关系：工具名在 `heading`，状态在它旁边。
-   */
+  /// 活动措辞保持不变；运行状态由行尾 spinner 与 VoiceOver value 表达。
   func testToolHeaderNamesToolAndStatesStatusBeside() throws {
     let row = try XCTUnwrap(TranscriptRow.decode(MessageListLogicTests.transcript(
-      #"[{"key":"tool","kind":"tool","name":"exec","status":"running","execution_location":{"kind":"container","name":"workspace"}}]"#)).first)
+      #"[{"key":"tool","kind":"tool","name":"exec","status":"running","location":"workspace"}]"#)).first)
     let cell = ToolMessageCell(frame: .zero)
     cell.configure(row)
-    // 标题 = 工具名 + 执行位置（位置挂在这一行上，不单独占一行）。
-    XCTAssertEqual(cell.heading.text, "exec · workspace")
-    XCTAssertEqual(cell.stateLabel.text, "Running", "状态行只回答「现在怎么样」")
-    XCTAssertFalse(cell.stateLabel.isHidden)
+    XCTAssertEqual(cell.heading.text, MemohStrings.text("Ran commands"))
+    XCTAssertEqual(cell.accessibilityValue, MemohStrings.text("Running"))
+    XCTAssertTrue(cell.accessibilityLabel?.contains("exec. workspace") == true)
     XCTAssertTrue(cell.spinner.isAnimating, "执行中要有活的指示，静止图标会被读成卡住")
-    XCTAssertTrue(cell.symbol.isHidden, "进行中只给 spinner，不叠静态图标")
+    XCTAssertFalse(cell.symbol.isHidden, "前导图标表达活动类型，不重复表达运行状态")
+    XCTAssertEqual(cell.heading.font, UIFont.preferredFont(forTextStyle: .footnote))
+    XCTAssertTrue(cell.heading.adjustsFontForContentSizeCategory)
+    XCTAssertEqual(cell.stack.layer.borderWidth, 0)
+    XCTAssertEqual(cell.stack.backgroundColor, .clear)
+    XCTAssertTrue(cell.isAccessibilityElement)
+    XCTAssertEqual(cell.accessibilityIdentifier, "message-block-tool")
+    XCTAssertNil(cell.accessibilityCustomActions)
+    XCTAssertFalse(cell.accessibilityTraits.contains(.button))
 
-    // 完成之后**不给状态词、也不给图标**：完成是常态，而且对勾在断言"成功了"。
+    // 完成后仍是相同的类型图标与措辞，只停 spinner。
     let finished = try XCTUnwrap(TranscriptRow.decode(MessageListLogicTests.transcript(
-      #"[{"key":"tool","kind":"tool","name":"exec","status":"done","execution_location":{"kind":"container","name":"workspace"}}]"#)).first)
+      #"[{"key":"tool","kind":"tool","name":"exec","status":"done","location":"workspace"}]"#)).first)
     cell.configure(finished)
-    XCTAssertTrue(cell.stateLabel.isHidden, "完成态不贴状态词")
-    XCTAssertTrue(cell.symbol.isHidden, "完成态不给图标——它不该断言这次调用成功")
+    XCTAssertNil(cell.accessibilityValue, "完成态不贴状态词")
+    XCTAssertFalse(cell.symbol.isHidden)
     XCTAssertFalse(cell.spinner.isAnimating, "跑完了要停掉 spinner，不能留着空转")
-    XCTAssertEqual(cell.heading.text, "exec · workspace", "位置仍然显示，只是不占状态行")
+    XCTAssertEqual(cell.heading.text, MemohStrings.text("Ran commands"))
+    cell.configure(row)
+    cell.prepareForReuse()
+    XCTAssertFalse(cell.spinner.isAnimating)
+    XCTAssertNil(cell.accessibilityLabel)
+    XCTAssertNil(cell.accessibilityIdentifier)
+  }
+
+  func testGroupedToolErrorsKeepNeutralRenderingAndAllAccessibleNames() throws {
+    let rows = try TranscriptRow.decode(MessageListLogicTests.transcript(MessageListLogicTests.chatToolsBlocks))
+    let group = try XCTUnwrap(MessageListLogicTests.toolGroups(rows).first)
+    let cell = ToolMessageCell(frame: .zero)
+    cell.configure(group)
+    let text = cell.heading.text
+    let icon = cell.symbol.image
+    XCTAssertEqual(cell.heading.textColor, .secondaryLabel)
+    XCTAssertEqual(cell.symbol.tintColor, .secondaryLabel)
+    XCTAssertEqual(cell.spinner.color, .secondaryLabel)
+    XCTAssertTrue(cell.spinner.isAnimating)
+    XCTAssertTrue(cell.body.isHidden)
+    XCTAssertEqual(cell.accessibilityIdentifier, "message-block-m10")
+    XCTAssertEqual(cell.accessibilityLabel?.components(separatedBy: "exec").count, 3)
+    XCTAssertTrue(cell.accessibilityLabel?.contains("fs_write") == true)
+    let clean = MessageListLogicTests.chatToolsBlocks.replacingOccurrences(of: "\"isError\":true", with: "\"isError\":false")
+    let cleanRows = try TranscriptRow.decode(MessageListLogicTests.transcript(clean))
+    cell.configure(try XCTUnwrap(MessageListLogicTests.toolGroups(cleanRows).first))
+    XCTAssertEqual(cell.heading.text, text)
+    XCTAssertEqual(cell.symbol.image, icon)
+    XCTAssertEqual(cell.heading.textColor, .secondaryLabel)
+    XCTAssertEqual(cell.symbol.tintColor, .secondaryLabel)
+    XCTAssertEqual(cell.spinner.color, .secondaryLabel)
+  }
+
+  func testListGroupsToolsAndRefreshesWhenNonFirstToolFinishes() async throws {
+    let list = NativeMessageList(appContext: nil)
+    list.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+    let blocks = #"[{"key":"a","kind":"tool","name":"exec","status":"done"},{"key":"b","kind":"tool","name":"fs_read","status":"running"}]"#
+    list.setTurnsJSON(MessageListLogicTests.transcript(blocks))
+    try await settle()
+    list.layoutIfNeeded()
+    let collection = try XCTUnwrap(list.subviews.compactMap { $0 as? UICollectionView }.first)
+    XCTAssertEqual(collection.numberOfItems(inSection: 0), 1)
+    let cell = try XCTUnwrap(collection.cellForItem(at: IndexPath(item: 0, section: 0)) as? ToolMessageCell)
+    XCTAssertEqual(cell.accessibilityIdentifier, "message-block-a")
+    XCTAssertTrue(cell.spinner.isAnimating)
+    let text = cell.heading.text
+    list.setTurnsJSON(MessageListLogicTests.transcript(blocks.replacingOccurrences(of: "running", with: "done")))
+    try await settle()
+    XCTAssertEqual(collection.numberOfItems(inSection: 0), 1)
+    let updated = try XCTUnwrap(collection.cellForItem(at: IndexPath(item: 0, section: 0)) as? ToolMessageCell)
+    XCTAssertEqual(updated.accessibilityIdentifier, "message-block-a")
+    XCTAssertEqual(updated.heading.text, text)
+    XCTAssertFalse(updated.spinner.isAnimating)
   }
 }
 #endif
 
 // No UIKit, Expo, window, account, or simulator required. Compile alongside Transcript.swift.
 final class MessageListLogicTests: XCTestCase {
+  // chat-tools after the TS reducer: running -> status, execution_location -> location.
+  static let chatToolsBlocks = #"[{"key":"m10","kind":"tool","name":"exec","title":"pytest -q tests/reports","status":"running","location":"workspace","input":{"command":"pytest -q tests/reports"}},{"key":"m11","kind":"tool","name":"fs_write","title":"fs_write","status":"done","input":{"path":"/data/reports/chart-1.png"},"output":"wrote 240 KB"},{"key":"m12","kind":"tool","name":"exec","title":"npm run build","status":"done","input":{"command":"npm run build"},"output":{"isError":true,"content":[{"type":"text","text":"Module not found: @scope/missing"}]}}]"#
+
+  static func toolGroups(_ rows: [TranscriptRow]) -> [ToolActivityGroup] {
+    TranscriptDisplayRow.grouped(rows).compactMap {
+      if case .tools(let group) = $0 { return group }
+      return nil
+    }
+  }
+
+  func testConsecutiveToolsGroupAndEveryOtherKindBreaksTheGroup() throws {
+    let tools = try TranscriptRow.decode(Self.transcript(Self.chatToolsBlocks))
+    let grouped = TranscriptDisplayRow.grouped(tools)
+    XCTAssertEqual(grouped.count, 1)
+    XCTAssertEqual(Self.toolGroups(tools).first?.rows, tools)
+    XCTAssertEqual(grouped.first?.id, tools.first?.id)
+    XCTAssertEqual(Self.toolGroups([tools[0]]).first?.rows, [tools[0]])
+    XCTAssertTrue(TranscriptDisplayRow.grouped([]).isEmpty)
+    for kind in BlockKind.allCases where kind != .tool {
+      let separator = try XCTUnwrap(TranscriptRow.decode(Self.transcript(
+        #"[{"key":"break","kind":"\#(kind.rawValue)","text":"Interlude"}]"#)).first)
+      let result = TranscriptDisplayRow.grouped([tools[0], separator, tools[1], tools[2]])
+      XCTAssertEqual(result.count, 3)
+      XCTAssertEqual(result[1], .block(separator), "非工具渲染行必须原样保留")
+      XCTAssertEqual(Self.toolGroups([tools[0], separator, tools[1], tools[2]]).map(\.rows.count), [1, 2])
+    }
+  }
+
+  func testGroupsNeverCrossTurnMessageOrRoleBoundaries() throws {
+    let blocks = #"[{"key":"t","kind":"tool","name":"exec"}]"#
+    let first = try XCTUnwrap(TranscriptRow.decode(Self.transcript(blocks)).first)
+    let otherTurn = try XCTUnwrap(TranscriptRow.decode(Self.transcript(blocks, turn: "other")).first)
+    let otherMessage = try XCTUnwrap(TranscriptRow.decode(Self.transcript(blocks, message: "other")).first)
+    let otherRole = TranscriptRow(id: .init(turn: first.id.turn, message: first.id.message,
+      role: "system", block: "other", kind: .tool), block: first.block)
+    for other in [otherTurn, otherMessage, otherRole] {
+      XCTAssertEqual(TranscriptDisplayRow.grouped([first, other]).count, 2)
+    }
+  }
+
+  func testToolActivityCategoryMappingAndFallback() {
+    let cases: [(ToolActivityCategory, [String])] = [
+      (.read, ["read", "fs_read", "list_files", "search", "ReadFile", "web_search"]),
+      (.edit, ["write", "fs_write", "edit", "apply_patch", "patch", "apply"]),
+      (.execute, ["exec", "execute", "bash", "shell", "run_command", "terminal"]),
+      (.network, ["fetch", "web", "http_get", "HTTP"]),
+      (.other, ["custom_action", "git_commit", "", "computer"]),
+    ]
+    for (category, names) in cases {
+      for name in names { XCTAssertEqual(ToolActivityCategory.classify(name), category, name) }
+    }
+    XCTAssertEqual(ToolActivityCategory.classify(nil), .other)
+    XCTAssertEqual(ToolActivityCategory.allCases.map(\.symbolName), [
+      "doc.text.magnifyingglass", "square.and.pencil", "terminal", "globe", "wrench.and.screwdriver",
+    ])
+    XCTAssertEqual(ToolActivityCategory.allCases.map(\.titleKey), [
+      "Read files", "Edited files", "Ran commands", "Fetched from the web", "Used tools",
+    ])
+  }
+
+  func testMixedActivityWordingDeduplicatesAndCapsAtThreeInFirstSeenOrder() throws {
+    let names = ["exec", "fs_read", "bash", "fs_write", "fetch", "custom"]
+    let blocks = names.enumerated().map { index, name in
+      #"{"key":"\#(index)","kind":"tool","name":"\#(name)"}"#
+    }.joined(separator: ",")
+    let rows = try TranscriptRow.decode(Self.transcript("[" + blocks + "]"))
+    let group = try XCTUnwrap(Self.toolGroups(rows).first)
+    XCTAssertEqual(group.categories, [.execute, .read, .edit, .network, .other])
+    XCTAssertEqual(group.text, ["Ran commands", "Read files", "Edited files"]
+      .map { MemohStrings.text($0) }.joined(separator: MemohStrings.text(", ")))
+    XCTAssertEqual(group.symbolName, "wrench.and.screwdriver")
+    XCTAssertEqual(group.text, Self.toolGroups(rows).first?.text)
+    let singleCategory = try XCTUnwrap(Self.toolGroups([rows[0], rows[2]]).first)
+    XCTAssertEqual(singleCategory.text, MemohStrings.text("Ran commands"))
+    XCTAssertEqual(singleCategory.symbolName, "terminal")
+    XCTAssertEqual(group.rows, rows, "三类上限只影响摘要，不能截掉原始工具")
+  }
+
+  func testActivitySpinnerReflectsAnyMemberWithoutChangingWording() throws {
+    let blocks = #"[{"key":"a","kind":"tool","name":"exec","status":"done"},{"key":"b","kind":"tool","name":"exec","status":"running"}]"#
+    let running = try XCTUnwrap(Self.toolGroups(TranscriptRow.decode(Self.transcript(blocks))).first)
+    XCTAssertTrue(running.showsSpinner)
+    for status in ["done", "failed", "unknown"] {
+      let stopped = try XCTUnwrap(Self.toolGroups(TranscriptRow.decode(Self.transcript(
+        blocks.replacingOccurrences(of: "running", with: status)))).first)
+      XCTAssertFalse(stopped.showsSpinner)
+      XCTAssertEqual(stopped.text, running.text)
+      XCTAssertEqual(stopped.symbolName, running.symbolName)
+      XCTAssertEqual(stopped.foreground, running.foreground)
+      XCTAssertEqual(stopped.first.id, running.first.id)
+      XCTAssertNotEqual(stopped, running, "非首个工具状态变更必须触发 diffable reconfigure")
+    }
+  }
+
+  func testActivityErrorsRemainNeutralAndPreserveOriginalDetails() throws {
+    let rows = try TranscriptRow.decode(Self.transcript(Self.chatToolsBlocks))
+    let group = try XCTUnwrap(Self.toolGroups(rows).first)
+    XCTAssertTrue(ToolResultDiagnosis.read(rows[2].block.output).isError)
+    XCTAssertEqual(group.text, ["Ran commands", "Edited files"].map { MemohStrings.text($0) }
+      .joined(separator: MemohStrings.text(", ")))
+    XCTAssertEqual(group.foreground, .secondary)
+    XCTAssertTrue(group.showsSpinner)
+    XCTAssertEqual(group.accessibilityDescriptions.count, 3)
+    for (description, name) in zip(group.accessibilityDescriptions, ["exec", "fs_write", "exec"]) {
+      XCTAssertTrue(description.hasPrefix(name))
+    }
+    XCTAssertTrue(group.accessibilityDescriptions[2].contains("Module not found"))
+    for output in [#"{"isError":false}"#, #"{"structuredContent":{"isError":true}}"#] {
+      let updated = try TranscriptRow.decode(Self.transcript(
+        #"[{"key":"m12","kind":"tool","name":"exec","status":"done","output":\#(output)}]"#))
+      let changed = try XCTUnwrap(Self.toolGroups([rows[0], rows[1], updated[0]]).first)
+      XCTAssertEqual(changed.text, group.text)
+      XCTAssertEqual(changed.foreground, group.foreground)
+      XCTAssertEqual(changed.symbolName, group.symbolName)
+      XCTAssertNotEqual(changed, group, "仅 output 变更也必须保留并刷新")
+    }
+  }
+
+  func testAppendingToolsRetainsIdentityAndOriginalInputUpdates() throws {
+    let rows = try TranscriptRow.decode(Self.transcript(Self.chatToolsBlocks))
+    let one = try XCTUnwrap(TranscriptDisplayRow.grouped([rows[0]]).first)
+    let all = try XCTUnwrap(TranscriptDisplayRow.grouped(rows).first)
+    XCTAssertEqual(one.id, all.id)
+    XCTAssertNotEqual(one, all)
+    let changedRows = try TranscriptRow.decode(Self.transcript(
+      Self.chatToolsBlocks.replacingOccurrences(of: "npm run build", with: "npm test")))
+    let changed = try XCTUnwrap(TranscriptDisplayRow.grouped(changedRows).first)
+    XCTAssertEqual(changed.id, all.id)
+    XCTAssertNotEqual(changed, all)
+  }
+
   static func transcript(_ blocks: String, turn: String = "turn", message: String = "message") -> String {
     """
     [{"key":"\(turn)","position":0,"active":false,
@@ -436,6 +621,13 @@ final class MessageListLogicTests: XCTestCase {
 enum MessageListTestRunner {
   static func main() {
     XCTMain([testCase([
+      ("testConsecutiveToolsGroupAndEveryOtherKindBreaksTheGroup", MessageListLogicTests.testConsecutiveToolsGroupAndEveryOtherKindBreaksTheGroup),
+      ("testGroupsNeverCrossTurnMessageOrRoleBoundaries", MessageListLogicTests.testGroupsNeverCrossTurnMessageOrRoleBoundaries),
+      ("testToolActivityCategoryMappingAndFallback", MessageListLogicTests.testToolActivityCategoryMappingAndFallback),
+      ("testMixedActivityWordingDeduplicatesAndCapsAtThreeInFirstSeenOrder", MessageListLogicTests.testMixedActivityWordingDeduplicatesAndCapsAtThreeInFirstSeenOrder),
+      ("testActivitySpinnerReflectsAnyMemberWithoutChangingWording", MessageListLogicTests.testActivitySpinnerReflectsAnyMemberWithoutChangingWording),
+      ("testActivityErrorsRemainNeutralAndPreserveOriginalDetails", MessageListLogicTests.testActivityErrorsRemainNeutralAndPreserveOriginalDetails),
+      ("testAppendingToolsRetainsIdentityAndOriginalInputUpdates", MessageListLogicTests.testAppendingToolsRetainsIdentityAndOriginalInputUpdates),
       ("testToolStateMapping", MessageListLogicTests.testToolStateMapping),
       ("testHierarchySeparatesUserBubblesFromAgentActivity", MessageListLogicTests.testHierarchySeparatesUserBubblesFromAgentActivity),
       ("testToolTitleVisibility", MessageListLogicTests.testToolTitleVisibility),

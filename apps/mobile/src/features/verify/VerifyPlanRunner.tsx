@@ -14,7 +14,7 @@ import { useRouter } from 'expo-router';
 
 import { createdSessionId } from '../../api/types.ts';
 import type { VerifyBootstrap } from './bootstrap.ts';
-import { watchVerifyScene } from './seed.ts';
+import { watchVerifyNavigation } from './seed.ts';
 import { useSession } from '../session/store.tsx';
 
 export function VerifyPlanRunner({ verify }: { verify: VerifyBootstrap | null }) {
@@ -31,6 +31,10 @@ export function VerifyPlanRunner({ verify }: { verify: VerifyBootstrap | null })
     verify?.plan?.scenario === 'scene' && typeof verify.plan.scene === 'string'
       ? verify.plan.scene
       : null;
+  const routeMode =
+    verify?.plan?.scenario === 'route' && typeof verify.plan.path === 'string'
+      ? verify.plan.path
+      : null;
 
   useEffect(() => {
     if (sceneMode !== null) {
@@ -38,6 +42,15 @@ export function VerifyPlanRunner({ verify }: { verify: VerifyBootstrap | null })
       started.current = true;
       // `replace` 而不是 `push`：场景台是这一趟的目的地，不是从首页点进去的下一层。
       router.replace(`/debug/scene/${sceneMode}`);
+      return;
+    }
+    // 直接开某个真实页面。**要等 bot 列表到位**——首页与设置页的文案依赖
+    // 当前 bot（名字、权限），早跳会截到还没取到数据的中间态。
+    if (routeMode !== null) {
+      if (started.current) return;
+      if (state.bots.length === 0) return;
+      started.current = true;
+      router.replace(routeMode as never);
       return;
     }
 
@@ -86,6 +99,7 @@ export function VerifyPlanRunner({ verify }: { verify: VerifyBootstrap | null })
     })();
   }, [
     sceneMode,
+    routeMode,
     verify,
     state.bots,
     state.sessions,
@@ -100,23 +114,30 @@ export function VerifyPlanRunner({ verify }: { verify: VerifyBootstrap | null })
 }
 
 /**
- * 场景模式下跟着种子文件切场景（仅开发构建）。
+ * 验收导航的跟随者（仅开发构建）。
+ *
+ * 跟着种子文件切换到场景台或某个真实页面。
  *
  * 单独一个组件而不是塞进 `VerifyPlanRunner`：那个组件的 effect 依赖一堆 store 状态
- * （bots / sessions / client），每次它们变化都会重跑 effect；而场景切换只依赖一个
- * 文件，两者生命周期不同。分开以后场景切换也不受 store 刷新影响。
+ * （bots / sessions / client），每次它们变化都会重跑 effect；而这里只依赖一个文件，
+ * 两者生命周期不同。分开以后切换也不受 store 刷新影响。
  */
 export function ScenePlanWatcher({ verify }: { verify: VerifyBootstrap | null }) {
   const router = useRouter();
   const plan = verify?.plan ?? null;
-  const isSceneMode = plan?.scenario === 'scene';
+  const enabled = plan?.scenario === 'scene' || plan?.scenario === 'route';
 
   useEffect(() => {
-    if (plan === null || !isSceneMode || plan.scene === undefined) return;
-    return watchVerifyScene(plan, (sceneId) => {
-      router.replace(`/debug/scene/${sceneId}`);
+    if (plan === null || !enabled) return;
+    return watchVerifyNavigation(plan, (target) => {
+      const [kind, value] = [
+        target.slice(0, target.indexOf(':')),
+        target.slice(target.indexOf(':') + 1),
+      ];
+      if (kind === 'scene') router.replace(`/debug/scene/${value}`);
+      if (kind === 'route') router.replace(value as never);
     });
-  }, [plan, isSceneMode, router]);
+  }, [plan, enabled, router]);
 
   return null;
 }

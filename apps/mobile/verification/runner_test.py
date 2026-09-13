@@ -204,7 +204,14 @@ class PlanningTests(unittest.TestCase):
 
         shards = runner.shard(cases, min(3, len(cases)))
 
-        self.assertEqual(sorted(case.name for shard in shards for case in shard), [c.name for c in cases])
+        # 分片要**保留每个 case**，且每个只出现一次——顺序不重要。
+        #
+        # 原来是拿 `sorted(...)` 和未排序的名单比，只在 case 恰好按字母序声明时才
+        # 通过（app-launch / scenes）。加进 `pages` 之后它才暴露出来：那个断言写的
+        # 是"顺序必须等于声明顺序"，而它想说的是"集合必须一致"。
+        flattened = [case.name for shard in shards for case in shard]
+        self.assertEqual(sorted(flattened), sorted(c.name for c in cases))
+        self.assertEqual(len(flattened), len(set(flattened)), '同一个 case 不能出现在两个分片里')
         sizes = [len(shard) for shard in shards]
         self.assertLessEqual(max(sizes) - min(sizes), 1)
 

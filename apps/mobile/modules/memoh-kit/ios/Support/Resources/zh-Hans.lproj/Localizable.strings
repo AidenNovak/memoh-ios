@@ -15,6 +15,12 @@
 "Expanded" = "已展开";
 "Collapsed" = "已收起";
 "Tool" = "工具";
+"Read files" = "读取了文件";
+"Edited files" = "编辑了文件";
+"Ran commands" = "执行了命令";
+"Fetched from the web" = "访问了网络";
+"Used tools" = "调用了工具";
+", " = "、";
 "Error code" = "错误码";
 "Notice" = "提示";
 "Untitled attachment" = "未命名附件";

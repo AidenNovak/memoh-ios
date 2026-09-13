@@ -37,6 +37,7 @@ APPEARANCES = ('light', 'dark')
 
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(VERIFICATION))
+import fixture as fixture_orchestrator  # noqa: E402
 import metro as metro_orchestrator  # noqa: E402
 from driver import Driver, DriverError  # noqa: E402
 from simulator import DEVICE_TYPES, SimulatorPool, run_with_simulator  # noqa: E402
@@ -57,6 +58,9 @@ class Case:
     scene: str = ''
     # 需要外部服务端才能跑。**不能进默认选择**——验收基线的定义就是"空手也能复现"。
     requires_live: bool = False
+    # 需要本地那个固定数据服务端（verification/fixture/server.mjs）。它不要凭据、
+    # 不要隧道、数据写死，所以**可以**进默认选择——和 launch/scenes 一样"空手能跑"。
+    requires_fixture: bool = False
 
     def evidence(self):
         parts = [f'screenshot {name}' for name in self.screenshots]
@@ -86,6 +90,17 @@ CASES = {
         scene='固定帧序列回放：工具状态、思考分层、审批、失败、长会话、断连、附件',
         timeout=900,
     ),
+    'pages': Case(
+        name='pages',
+        batch='pages',
+        description='真实页面截图：首页、空态、设置页、对话页（连固定服务端，不需要凭据）',
+        script=CASES_DIR / 'pages.py',
+        screenshots=(),
+        scene='真实页面 × 固定数据：走完整 store → HTTP → 页面链路',
+        timeout=900,
+        # 需要本地起一个固定服务端（verification/fixture/server.mjs）。
+        requires_fixture=True,
+    ),
     'chat-roundtrip': Case(
         name='chat-roundtrip',
         batch='live',
@@ -101,6 +116,7 @@ CASES = {
 BATCHES = {
     'launch': ['app-launch'],
     'scenes': ['scenes'],
+    'pages': ['pages'],
     'live': ['chat-roundtrip'],
 }
 
@@ -556,8 +572,14 @@ def main(argv=None):
         _null_context() if arguments.shared_metro
         else metro_orchestrator.managed_metro(ROOT, arguments.port, run_directory)
     )
+    # 固定数据服务端按需启动：只有选中的 case 需要它时才起进程。
+    fixture_context = (
+        fixture_orchestrator.managed_fixture(log_directory=run_directory)
+        if fixture_orchestrator.needs_fixture(cases)
+        else _null_context()
+    )
     try:
-        with metro_context:
+        with metro_context, fixture_context:
             results = execute_run(cases, run_directory, arguments, context)
     except DriverError as error:
         raise SystemExit(str(error))

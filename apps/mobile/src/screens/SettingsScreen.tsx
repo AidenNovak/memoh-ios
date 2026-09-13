@@ -5,11 +5,18 @@
  * video、email…），那些都是"坐在电脑前配置一次"的东西，搬到手机上每个都会变成
  * 一堆难用的表单。这里保留的是：账号、外观、语言、以及一个进 Debug 的入口。
  *
- * 设计上刻意贴近系统「设置」的形态：分组、发丝线、行是可点的、danger 动作独立成组。
+ * ## 形态
+ *
+ * 用 `GroupedList`（inset 分组卡片 + 发丝线左缩进 + 44pt 行高）。页面里**没有
+ * 自绘的标题栏**——标题是滚动内容的第一行，`‹` 返回放在它旁边。
+ *
+ * 为什么不用原生导航栏：这个项目的路由是全 RN 的（`headerShown: false`），
+ * 原生导航栏需要另一套 bridge。自绘的代价是转场时标题不会跟随系统动画，
+ * 收益是这一屏的形状、间距、分组全部可控。等哪天补了原生导航模块再换。
  */
 import { useRouter } from 'expo-router';
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { AppearanceMode } from '../lib/theme/index.ts';
@@ -23,8 +30,10 @@ import {
 } from '../lib/i18n/index.ts';
 import { useT } from '../lib/i18n/useT.ts';
 import { useLocale } from '../lib/i18n/useLocale.ts';
+import { GROUP_INSET, MIN_TOUCH_TARGET, spacing, typography } from '../lib/theme/tokens.ts';
 import { usePalette, useTheme } from '../lib/theme/context.tsx';
 import { useSession } from '../features/session/store.tsx';
+import { Group, Row } from '../ui/GroupedList.tsx';
 
 const APPEARANCE_MODES: AppearanceMode[] = ['system', 'light', 'dark', 'oled'];
 const APPEARANCE_KEY: Record<AppearanceMode, string> = {
@@ -36,7 +45,6 @@ const APPEARANCE_KEY: Record<AppearanceMode, string> = {
 
 export function SettingsScreen() {
   const palette = usePalette();
-  const { spacing, typography, radius } = useTheme();
   const insets = useSafeAreaInsets();
   const t = useT();
   const locale = useLocale();
@@ -44,213 +52,110 @@ export function SettingsScreen() {
   const { state, currentBot, signOut } = useSession();
   const { mode, setMode } = useTheme();
 
+  const botName =
+    currentBot?.display_name !== '' && currentBot?.display_name !== undefined
+      ? currentBot.display_name
+      : (currentBot?.name ?? '');
+
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: palette.groupedBackground }}
       contentContainerStyle={{
-        paddingTop: insets.top + spacing.lg,
-        paddingBottom: insets.bottom + spacing.xl,
+        paddingTop: insets.top + spacing.sm,
+        paddingBottom: insets.bottom + spacing.xxl,
+        paddingHorizontal: GROUP_INSET,
       }}
     >
       <View
         style={{
           flexDirection: 'row',
           alignItems: 'center',
-          paddingHorizontal: spacing.lg,
+          gap: spacing.sm,
+          minHeight: MIN_TOUCH_TARGET,
           marginBottom: spacing.lg,
         }}
       >
-        <Pressable
+        <Text
           accessibilityRole="button"
+          accessibilityLabel={t('common.back')}
           onPress={() => router.back()}
-          hitSlop={12}
-          style={{ width: 32, height: 44, justifyContent: 'center' }}
+          style={[typography.body, { color: palette.accent }]}
         >
-          <Text style={[typography.body, { color: palette.accent }]}>‹</Text>
-        </Pressable>
+          ‹
+        </Text>
         <Text style={[typography.title2, { color: palette.label }]}>{t('settings.title')}</Text>
       </View>
 
-      <Section title={t('settings.account')}>
-        <Row label={t('settings.server')} value={state.client?.url ?? ''} />
+      <Group header={t('settings.account')}>
         <Row
-          label={t('settings.account')}
-          value={currentBot?.display_name ?? currentBot?.name ?? ''}
+          title={t('settings.account')}
+          value={botName}
+          subtitle={state.client?.url ?? ''}
           last
         />
-      </Section>
+      </Group>
 
-      <Section title={t('settings.appearance')}>
+      <Group
+        header={t('settings.appearance')}
+        footer={mode === 'oled' ? t('settings.appearance.oled.footer') : undefined}
+      >
         {APPEARANCE_MODES.map((option, index) => (
-          <Pressable
+          <Row
             key={option}
-            accessibilityRole="button"
-            accessibilityState={{ selected: mode === option }}
+            title={t(APPEARANCE_KEY[option])}
+            selected={mode === option}
+            last={index === APPEARANCE_MODES.length - 1}
             onPress={() => setMode(option)}
-            style={({ pressed }) => [
-              styles.row,
-              {
-                backgroundColor: pressed ? palette.field : palette.card,
-                borderBottomColor: palette.separator,
-                borderBottomWidth:
-                  index === APPEARANCE_MODES.length - 1 ? 0 : StyleSheet.hairlineWidth,
-                paddingHorizontal: spacing.lg,
-              },
-            ]}
-          >
-            <Text style={[typography.body, { color: palette.label, flex: 1 }]}>
-              {t(APPEARANCE_KEY[option])}
-            </Text>
-            {mode === option ? (
-              <Text style={[typography.body, { color: palette.accent }]}>✓</Text>
-            ) : null}
-          </Pressable>
+          />
         ))}
-      </Section>
-      {mode === 'oled' ? (
-        <Text
-          style={[
-            typography.footnote,
-            {
-              color: palette.secondaryLabel,
-              paddingHorizontal: spacing.lg,
-              marginTop: -spacing.sm,
-              marginBottom: spacing.lg,
-            },
-          ]}
-        >
-          {t('settings.appearance.oled.footer')}
-        </Text>
-      ) : null}
+      </Group>
 
-      <Section title={t('settings.language')}>
+      <Group header={t('settings.language')}>
         {SUPPORTED_LOCALES.map((option: Locale, index) => (
-          <Pressable
+          <Row
             key={option}
-            accessibilityRole="button"
-            accessibilityState={{ selected: locale === option }}
+            title={localeDisplayName(option)}
+            selected={getLocale() === option}
+            last={index === SUPPORTED_LOCALES.length - 1}
             onPress={() => setLocale(option)}
-            style={({ pressed }) => [
-              styles.row,
-              {
-                backgroundColor: pressed ? palette.field : palette.card,
-                borderBottomColor: palette.separator,
-                borderBottomWidth:
-                  index === SUPPORTED_LOCALES.length - 1 ? 0 : StyleSheet.hairlineWidth,
-                paddingHorizontal: spacing.lg,
-              },
-            ]}
-          >
-            <Text style={[typography.body, { color: palette.label, flex: 1 }]}>
-              {localeDisplayName(option)}
-            </Text>
-            {getLocale() === option ? (
-              <Text style={[typography.body, { color: palette.accent }]}>✓</Text>
-            ) : null}
-          </Pressable>
+          />
         ))}
-      </Section>
+      </Group>
 
-      <Section>
-        <Pressable
-          accessibilityRole="button"
+      <Group>
+        <Row
+          title={t('settings.signOut')}
+          destructive
+          last
           onPress={() => {
             void clearSession().then(() => {
               signOut();
               router.replace('/');
             });
           }}
-          style={({ pressed }) => [
-            styles.row,
-            {
-              backgroundColor: pressed ? palette.field : palette.card,
-              paddingHorizontal: spacing.lg,
-              borderBottomWidth: 0,
-            },
-          ]}
-        >
-          <Text style={[typography.body, { color: palette.destructive }]}>
-            {t('settings.signOut')}
-          </Text>
-        </Pressable>
-      </Section>
+        />
+      </Group>
 
-      <Pressable
-        accessibilityRole="button"
-        onPress={() => router.push('/debug')}
-        style={{ paddingHorizontal: spacing.lg, paddingVertical: spacing.md }}
+      {__DEV__ ? (
+        <Group header="Debug">
+          <Row
+            title="Scenes"
+            subtitle="固定场景截图"
+            disclosure
+            onPress={() => router.push('/debug/scene')}
+          />
+          <Row title="Debug" last disclosure onPress={() => router.push('/debug')} />
+        </Group>
+      ) : null}
+
+      <Text
+        style={[
+          typography.footnote,
+          { color: palette.tertiaryLabel, textAlign: 'center', marginTop: spacing.sm },
+        ]}
       >
-        <Text style={[typography.footnote, { color: palette.tertiaryLabel }]}>
-          {t('settings.debug')}
-        </Text>
-      </Pressable>
+        Memoh for iOS
+      </Text>
     </ScrollView>
   );
 }
-
-function Section({ title, children }: { title?: string; children: React.ReactNode }) {
-  const palette = usePalette();
-  const { spacing, typography, radius } = useTheme();
-  return (
-    <View style={{ marginBottom: spacing.lg }}>
-      {title !== undefined ? (
-        <Text
-          style={[
-            typography.footnote,
-            {
-              color: palette.secondaryLabel,
-              paddingHorizontal: spacing.lg,
-              marginBottom: spacing.xs,
-              textTransform: 'uppercase',
-            },
-          ]}
-        >
-          {title}
-        </Text>
-      ) : null}
-      <View
-        style={{
-          backgroundColor: palette.card,
-          borderRadius: radius.md,
-          marginHorizontal: spacing.lg,
-          overflow: 'hidden',
-        }}
-      >
-        {children}
-      </View>
-    </View>
-  );
-}
-
-function Row({ label, value, last }: { label: string; value: string; last?: boolean }) {
-  const palette = usePalette();
-  const { spacing, typography } = useTheme();
-  return (
-    <View
-      style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        minHeight: 44,
-        paddingHorizontal: spacing.lg,
-        borderBottomWidth: last === true ? 0 : StyleSheet.hairlineWidth,
-        borderBottomColor: palette.separator,
-      }}
-    >
-      <Text style={[typography.body, { color: palette.label, flex: 1 }]}>{label}</Text>
-      <Text
-        style={[typography.subhead, { color: palette.secondaryLabel, maxWidth: '60%' }]}
-        numberOfLines={1}
-      >
-        {value}
-      </Text>
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    minHeight: 44,
-  },
-});

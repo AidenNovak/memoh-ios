@@ -34,12 +34,61 @@ export interface VerifySeed {
    *   - `chat`：用已有的第一个会话发一条消息（没有就新建）。走真实网络与协议。
    *   - `scene`：打开指定场景，用真实组件渲染固定帧序列。
    *     **不需要登录、也不连服务端**——这是设计迭代与视觉验收的入口。
+   *   - `route`：直接打开某个路由（`path` 指定）。用来给**真实页面**留截图——
+   *     首页、设置页这些页面从 store 取数，只能靠真实网络喂数据。
    */
-  scenario?: 'chat' | 'scene';
+  scenario?: 'chat' | 'scene' | 'route';
   /** `scenario: 'chat'` 时要发送的文本。 */
   message?: string;
   /** `scenario: 'scene'` 时要打开的场景 id（见 features/verify/scenes.ts）。 */
   scene?: string;
+  /** `scenario: 'route'` 时要打开的路由，如 `/settings`。 */
+  path?: string;
+}
+
+/**
+ * 验收脚本可以在 App 运行期间改种子文件来切换画面。
+ *
+ * 返回下一个要显示的东西：`scene:<id>` 或 `route:<path>`，没有变化时返回 null。
+ *
+ * ## 为什么读文件而不是 deep link
+ *
+ * `simctl openurl` 在 iOS 26 上会弹 "Open in Memoh?" 的系统确认框，而模拟器没法点它
+ * （这个项目没有点击能力），于是 deep link 那条路是堵死的。改文件、App 轮询，
+ * 不需要点击也不需要冷启动——一次启动能走完全部画面。见
+ * `docs/research/verified-behaviour.md` 第 9b 条。
+ */
+export function watchVerifyNavigation(
+  initial: VerifySeed,
+  onChange: (target: string) => void,
+): () => void {
+  if (!__DEV__) return () => {};
+  const describe = (seed: VerifySeed): string =>
+    seed.scenario === 'scene' && typeof seed.scene === 'string'
+      ? `scene:${seed.scene}`
+      : seed.scenario === 'route' && typeof seed.path === 'string'
+        ? `route:${seed.path}`
+        : '';
+  let last = describe(initial);
+
+  const timer = setInterval(() => {
+    let parsed: VerifySeed | null = null;
+    try {
+      const file = new File(Paths.document, SEED_FILENAME);
+      if (!file.exists) return;
+      const value: unknown = JSON.parse(file.textSync());
+      if (isSeed(value)) parsed = value;
+    } catch {
+      return; // 读到半截的 JSON 很正常（脚本正在写），下一轮再看。
+    }
+    if (parsed === null) return;
+    const next = describe(parsed);
+    if (next === '' || next === last) return;
+    last = next;
+    onChange(next);
+  }, 600);
+
+  return () => clearInterval(timer);
 }
 
 function isSeed(value: unknown): value is VerifySeed {
@@ -81,45 +130,4 @@ export function clearVerifySeed(): void {
   } catch {
     // 删不掉也不影响：下次启动还是同一份种子，验收等价。
   }
-}
-
-/**
- * 订阅种子文件里"要看哪个场景"的变化（仅开发构建）。
- *
- * ## 为什么需要这个
- *
- * 场景切换本来想用 deep link（`memoh:///debug/scene/<id>`），但 iOS 26 会对
- * `simctl openurl` 弹一个 "Open in Memoh?" 的系统确认框——而模拟器没法点它（这也
- * 是这个项目一直用脚本化动作代替手指的原因）。结果是每张截图都带着一个系统弹窗，
- * 而且场景根本切不过去。
- *
- * 改成读文件：验收脚本直接改 App 沙箱里的种子文件，App 轮询它。不需要点按、不需要
- * 冷启动（一次启动可以看完全部场景），切换也是确定的。
- *
- * 这个函数只在 `scenario === 'scene'` 时才被调用。
- */
-export function watchVerifyScene(
-  initial: VerifySeed,
-  onChange: (sceneId: string) => void,
-): () => void {
-  if (!__DEV__) return () => {};
-  let last = initial.scene ?? '';
-
-  const timer = setInterval(() => {
-    let next: unknown;
-    try {
-      const file = new File(Paths.document, SEED_FILENAME);
-      if (!file.exists) return;
-      const parsed: unknown = JSON.parse(file.textSync());
-      if (parsed === null || typeof parsed !== 'object') return;
-      next = (parsed as Record<string, unknown>).scene;
-    } catch {
-      return; // 读到半截的 JSON 很正常（脚本正在写），下一轮再看。
-    }
-    if (typeof next !== 'string' || next === last) return;
-    last = next;
-    onChange(next);
-  }, 600);
-
-  return () => clearInterval(timer);
 }

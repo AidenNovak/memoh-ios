@@ -120,7 +120,9 @@ export function useSessionActivity(client: MemohClient | null, bots: Bot[]): Act
           refs.set(session.id, {
             botId: bot.id,
             botName,
-            title: session.title !== '' ? session.title : session.id.slice(0, 8),
+            // 空标题保持空——"没标题怎么显示"是渲染层的事（要跟着语言走），
+            // 不该在这里固化成一个字符串。见 `sessionDisplayTitle`。
+            title: session.title,
           });
         }
 

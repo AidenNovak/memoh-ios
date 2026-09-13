@@ -14,8 +14,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { NativeMessageList } from '@memoh-ios/kit';
 import { useSession } from '../features/session/store.tsx';
+import { sessionDisplayTitle } from '../features/session/displayTitle.ts';
 import { hasContent, turnsForDisplay, type ChatState } from '../features/chat/reducer.ts';
 import { useT } from '../lib/i18n/useT.ts';
+import { radius, radiusStyle } from '../lib/theme/tokens.ts';
 import { usePalette, useTheme } from '../lib/theme/context.tsx';
 import { ApprovalSheet } from '../ui/ApprovalSheet.tsx';
 
@@ -54,10 +56,14 @@ export function ChatScreen() {
   const turns = useMemo(() => turnsForDisplay(chat).filter(hasContent), [chat]);
   // 标题取会话自己的名字——写死成"会话"会让所有会话长得一样，用户没法确认
   // 自己在跟哪一轮对话。
-  const sessionTitle =
-    state.sessions.find((entry) => entry.id === sessionId)?.title ?? t('chat.placeholder');
+  const sessionTitle = sessionDisplayTitle(
+    { title: state.sessions.find((entry) => entry.id === sessionId)?.title ?? '' },
+    t,
+  );
 
   const [draft, setDraft] = useState('');
+  /** 有没有"可以发"的内容：正在生成时按钮是停止，永远可用。 */
+  const canSend = chat.running || draft.trim() !== '';
   const turnsJson = useMemo(() => JSON.stringify(turns), [turns]);
 
   /**
@@ -174,6 +180,20 @@ export function ChatScreen() {
         emptyBody={t('chat.empty.body')}
       />
 
+      {/*
+        输入区。
+
+        形态照 iOS 消息类 App：一行**分离的两件东西**——左边一个可增高的输入胶囊，
+        右边一个 34pt 圆形按钮。两者之间 8pt。
+
+        为什么不把按钮放进胶囊里：那是 Web 聊天框的样子（一个框里塞输入和按钮）。
+        iOS 上输入框和动作按钮是分开的两个控件，按钮的圆是**正圆**而不是圆角方块。
+        视觉评审把"输入区"列为最容易失分的地方之一，主要就是这两点。
+
+        生成中时按钮**在同一个位置**变成停止：用户的心智模型是"那个位置现在能停"，
+        在别处冒出一个红色胶囊既不像系统控件也遮挡内容。形状不变、只换字形，
+        所以中途不会闪。
+      */}
       <View
         style={{
           flexDirection: 'row',
@@ -199,22 +219,17 @@ export function ChatScreen() {
               flex: 1,
               color: palette.label,
               backgroundColor: palette.field,
-              // 半高圆角：36pt 高时是胶囊，长高了自然变成圆角矩形。
-              borderRadius: 18,
+              // 半高圆角：34pt 高时是胶囊，长高了自然变成圆角矩形。
+              ...radiusStyle(radius.lg),
               paddingHorizontal: spacing.md,
-              paddingTop: spacing.sm,
-              paddingBottom: spacing.sm,
-              // 36pt 起步、最多 5 行左右。
+              // 上下对称的内边距。给单边额外 padding 会让多行时的首行偏移。
+              paddingVertical: spacing.sm,
+              // 34pt 起步（与按钮同高），最多约 5 行。
               maxHeight: 120,
-              minHeight: 36,
+              minHeight: 34,
             },
           ]}
         />
-        {/*
-          生成中时**同一个位置**变成停止按钮，而不是在旁边多出一个悬浮胶囊。
-          用户的心智模型是"那个箭头的位置现在可以停"——在别处放一个红色胶囊
-          既不像系统控件，也遮挡内容。
-        */}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={chat.running ? t('chat.stop') : t('chat.send')}
@@ -223,18 +238,17 @@ export function ChatScreen() {
           style={({ pressed }) => [
             styles.send,
             {
-              // 有文字（或正在生成）时是品牌色实心，否则是灰色——常灰会让人以为
-              // 按钮永远不可用。
-              backgroundColor: chat.running || draft.trim() !== '' ? palette.accent : palette.field,
-              opacity: pressed ? 0.85 : 1,
+              backgroundColor: canSend ? palette.accent : palette.field,
+              opacity: pressed ? 0.8 : 1,
             },
           ]}
         >
           <Text
             style={[
-              typography.headline,
+              typography.subhead,
               {
-                color: chat.running || draft.trim() !== '' ? '#FFFFFF' : palette.tertiaryLabel,
+                fontWeight: '600',
+                color: canSend ? palette.onAccent : palette.tertiaryLabel,
               },
             ]}
           >
@@ -256,9 +270,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   send: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    // 34pt 正圆，与输入框起始高度对齐——iOS 消息类 App 的比例。
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
   },

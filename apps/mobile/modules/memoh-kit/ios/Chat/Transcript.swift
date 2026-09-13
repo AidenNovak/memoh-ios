@@ -398,3 +398,127 @@ struct TranscriptRow: Equatable, Sendable {
     return rows
   }
 }
+
+// Native-only projection. Keep the decoded/bridged TranscriptRow contract untouched.
+// A group's first block owns its identity; appending a tool changes content, not identity.
+enum TranscriptDisplayRow: Equatable, Sendable {
+  case block(TranscriptRow)
+  case tools(ToolActivityGroup)
+
+  var first: TranscriptRow {
+    switch self {
+    case .block(let row): return row
+    case .tools(let group): return group.first
+    }
+  }
+
+  var id: TranscriptRow.ID { first.id }
+
+  static func grouped(_ rows: [TranscriptRow]) -> [Self] {
+    var result: [Self] = []
+    var pending: ToolActivityGroup?
+    for row in rows {
+      if row.block.kind == .tool {
+        if let first = pending?.first,
+           first.id.turn == row.id.turn, first.id.message == row.id.message,
+           first.id.role == row.id.role {
+          pending?.append(row)
+        } else {
+          if let pending { result.append(.tools(pending)) }
+          pending = ToolActivityGroup(row)
+        }
+      } else {
+        if let pending { result.append(.tools(pending)) }
+        pending = nil
+        result.append(.block(row))
+      }
+    }
+    if let pending { result.append(.tools(pending)) }
+    return result
+  }
+}
+
+enum ToolActivityCategory: CaseIterable, Sendable {
+  case read, edit, execute, network, other
+
+  static func classify(_ name: String?) -> Self {
+    let name = (name ?? "").lowercased()
+    // Ordered rules make overlapping names deterministic; never inspect commands/output.
+    let rules: [(Self, [String])] = [
+      (.read, ["read", "list", "search"]),
+      (.edit, ["write", "edit", "patch", "apply"]),
+      (.execute, ["exec", "bash", "shell", "command", "terminal"]),
+      (.network, ["fetch", "web", "http"]),
+    ]
+    return rules.first { rule in rule.1.contains { name.contains($0) } }?.0 ?? .other
+  }
+
+  var titleKey: String {
+    switch self {
+    case .read: return "Read files"
+    case .edit: return "Edited files"
+    case .execute: return "Ran commands"
+    case .network: return "Fetched from the web"
+    case .other: return "Used tools"
+    }
+  }
+
+  var symbolName: String {
+    switch self {
+    case .read: return "doc.text.magnifyingglass"
+    case .edit: return "square.and.pencil"
+    case .execute: return "terminal"
+    case .network: return "globe"
+    case .other: return "wrench.and.screwdriver"
+    }
+  }
+}
+
+struct ToolActivityGroup: Equatable, Sendable {
+  // Preserve every original input/output for future details and accessibility.
+  let first: TranscriptRow
+  private(set) var rows: [TranscriptRow]
+
+  init(_ first: TranscriptRow) {
+    precondition(first.block.kind == .tool)
+    self.first = first
+    rows = [first]
+  }
+
+  fileprivate mutating func append(_ row: TranscriptRow) { rows.append(row) }
+
+  var categories: [ToolActivityCategory] {
+    var result: [ToolActivityCategory] = []
+    for row in rows {
+      let category = ToolActivityCategory.classify(row.block.name)
+      if !result.contains(category) { result.append(category) }
+    }
+    return result
+  }
+
+  var text: String {
+    categories.prefix(3).map { MemohStrings.text($0.titleKey) }
+      .joined(separator: MemohStrings.text(", "))
+  }
+
+  var symbolName: String {
+    let categories = categories
+    return categories.count == 1 ? categories[0].symbolName : ToolActivityCategory.other.symbolName
+  }
+
+  var showsSpinner: Bool { rows.contains { $0.block.toolState == .running } }
+
+  // One neutral policy for every state, including isError. A tool result is not a run verdict.
+  enum Foreground: Sendable { case secondary }
+  var foreground: Foreground { .secondary }
+
+  var accessibilityDescriptions: [String] {
+    rows.map { row in
+      let block = row.block
+      let name = block.name?.isEmpty == false ? block.name! : MemohStrings.text("Tool")
+      let diagnosis = ToolResultDiagnosis.read(block.output)
+      return [name, block.location, block.title, block.input?.preview, diagnosis.text ?? block.error]
+        .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ". ")
+    }
+  }
+}

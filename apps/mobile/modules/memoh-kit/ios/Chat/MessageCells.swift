@@ -7,6 +7,7 @@ class MessageBlockCell: UICollectionViewCell {
   let symbol = UIImageView()
   let stack = UIStackView()
   let header = UIStackView()
+  var headingTextStyle: UIFont.TextStyle { .headline }
   private var leading: NSLayoutConstraint!
   private var userWidth: NSLayoutConstraint!
   private var user = false
@@ -48,7 +49,7 @@ class MessageBlockCell: UICollectionViewCell {
       (cell: MessageBlockCell, _: UITraitCollection) in
       cell.updateWidth()
       cell.stack.layer.borderColor = cell.borderColor.resolvedColor(with: cell.traitCollection).cgColor
-      cell.symbol.preferredSymbolConfiguration = UIImage.SymbolConfiguration(font: .preferredFont(forTextStyle: .headline))
+      cell.symbol.preferredSymbolConfiguration = UIImage.SymbolConfiguration(font: .preferredFont(forTextStyle: cell.headingTextStyle))
     }
   }
 
@@ -114,7 +115,7 @@ class MessageBlockCell: UICollectionViewCell {
     heading.textColor = color
     header.isHidden = text?.isEmpty != false
     symbol.image = name.flatMap { UIImage(systemName: $0) }
-    symbol.preferredSymbolConfiguration = UIImage.SymbolConfiguration(font: .preferredFont(forTextStyle: .headline))
+    symbol.preferredSymbolConfiguration = UIImage.SymbolConfiguration(font: .preferredFont(forTextStyle: headingTextStyle))
     symbol.tintColor = color
     symbol.isHidden = name == nil
   }
@@ -248,205 +249,65 @@ final class ReasoningMessageCell: MessageBlockCell {
 }
 
 final class ToolMessageCell: MessageBlockCell {
-  private let toolTitle = UILabel()
-  /** 状态与执行位置，跟在工具名后面 —— 它们是这个工具名的修饰，不是并列的信息。 */
-  let stateLabel = UILabel()
   let spinner = UIActivityIndicatorView(style: .medium)
-  private let input = UILabel()
+  override var headingTextStyle: UIFont.TextStyle { .footnote }
 
   override init(frame: CGRect) {
     super.init(frame: frame)
-    style(toolTitle, .callout)
-    style(stateLabel, .subheadline, color: .secondaryLabel)
-    style(input, .callout)
-    // 状态和工具名同一行。
-    //
-    // 之前"Running"与工具名各占一行、还都是 headline 字号，于是**状态和它修饰的
-    // 东西一样重**——扫一眼分不清哪个是主体。改成同一行：工具名是主体（headline），
-    // 状态是它的修饰（subheadline + 次要色）。
-    header.addArrangedSubview(stateLabel)
-    // 执行中要有**活的**指示，不能只靠一个静止的图标。
-    //
-    // UIActivityIndicatorView 是 iOS 的标准答案：用户看到转圈就知道"它在动、没卡
-    // 住"，而一个静止的沙漏在等待超过几秒后会被读成"卡死了"。上游 Web 端也是给
-    // running 加动画的（shimmer，延迟 250ms 起，理由见 verified-behaviour 第 16 条），
-    // 只是他们用 shimmer、我们用系统 spinner——spinner 是 iOS 上用户认得的那个东西，
-    // 而且它只旋转、不改布局，不会在流式追加时造成抖动。
+    header.alignment = .center
+    style(heading, .footnote, color: .secondaryLabel)
+    heading.lineBreakMode = .byWordWrapping
+    // Reserve the trailing slot even when stopped: completion must not reflow the text.
+    let spinnerSlot = UIView()
+    spinner.translatesAutoresizingMaskIntoConstraints = false
+    spinnerSlot.addSubview(spinner)
+    NSLayoutConstraint.activate([
+      spinnerSlot.widthAnchor.constraint(equalToConstant: 20),
+      spinnerSlot.heightAnchor.constraint(equalToConstant: 20),
+      spinner.centerXAnchor.constraint(equalTo: spinnerSlot.centerXAnchor),
+      spinner.centerYAnchor.constraint(equalTo: spinnerSlot.centerYAnchor),
+    ])
+    spinnerSlot.isAccessibilityElement = false
     spinner.hidesWhenStopped = true
-    spinner.setContentHuggingPriority(.required, for: .horizontal)
-    spinner.setContentCompressionResistancePriority(.required, for: .horizontal)
     spinner.isAccessibilityElement = false
-    header.insertArrangedSubview(spinner, at: 0)
-    stack.insertArrangedSubview(toolTitle, at: 1)
-    stack.insertArrangedSubview(input, at: 2)
+    header.addArrangedSubview(spinnerSlot)
   }
 
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-  override func prepareForReuse() {
-    super.prepareForReuse()
-    // 复用走掉的 cell 必须停掉动画：一个不可见的 spinner 还在转是白耗电，
-    // 而 iOS 不会因为你把它藏在屏幕外就自动停。
-    spinner.stopAnimating()
-    stateLabel.text = nil
-    toolTitle.text = nil
-    input.text = nil
+  static func color(for foreground: ToolActivityGroup.Foreground) -> UIColor {
+    switch foreground {
+    case .secondary: return .secondaryLabel
+    }
   }
 
-  override func configure(_ row: TranscriptRow) {
-    super.configure(row)
-    card()
-    let block = row.block
-    let state = block.toolState
-    // 工具出错**不着色**。
-    //
-    // 上游 Web 客户端把这条写成了明确规则（`tool-call-inline.vue`）：
-    // 「工具标题是执行过程摘要。Agent 在虚拟机中试错、检查并修复命令是正常的
-    // 长任务行为；非零退出码（包括 -1）或工具 isError 不等于用户任务失败。
-    // 标题保持中性色，不附加退出码或错误染色；诊断留在展开详情中，真正的任务
-    // 失败由回合级错误反馈表达，不能从某一次工具调用推导。」
-    //
-    // 也就是说：一次工具失败 ≠ 这一步失败 ≠ 任务失败。把工具行染红会让正常的
-    // 试错过程看起来像事故，而真正该被注意的回合级错误反而被淹掉。诊断信息在
-    // 下面照样能看到（output 里的内容），只是不用颜色替用户下结论。
-    //
-    // 标题 = 工具名 +（有的话）执行位置，和上游一样把位置**挂在这一行上**：
-    // `exec · workspace`。位置单独占一行时是个悬空的词，读者不知道它属于谁；
-    // 而它本来就是"这个工具在哪儿跑"的修饰，属于工具名这一行。
-    //
-    // 变量名刻意不叫 `heading`——基类上有个 UILabel 属性就叫这个名字，重名会遮蔽它，
-    // 于是后面的 `heading.text` 变成对 String 取 .text（踩过，见 Tools/typecheck-kit.sh）。
-    var titleLine = block.name?.isEmpty == false ? block.name! : MemohStrings.text("Tool")
-    if let location = block.location, !location.isEmpty {
-      titleLine += " · " + location
-    }
-    // **完成态不给图标，也不给状态词。**
-    //
-    // 查了上游的 `tool-call-inline.vue`：它那一行里**根本没有状态图标**，
-    // 只有 [动作描述] [目标] · [执行位置] 加一个展开箭头；未完成时靠 shimmer 表示。
-    //
-    // 我原来给完成的工具贴了一个对勾，那是我自己加的，而且它在断言一件事：
-    // "这次调用成功了"。可上游的明文规则是**不能从一次工具调用推导成败**
-    // （第 15 条）——那条规则对成功同样成立。三份视觉评审都把"灰色对勾 + 红色
-    // 报错"读成自相矛盾，那说明读者没问题，是图标多说了话。
-    //
-    // 现在图标只表达**需要用户注意**的两件事：正在跑（转圈）、服务端说这条出错了
-    // （警告）。跑完了就是跑完了，不需要一枚奖章。
-    setHeading(titleLine, symbol: nil, color: .label)
-    let isRunning = state == .running
-    // 注意顺序：`setHeading` 会把图标清掉（它默认 symbol: nil），所以图标要在它之后设。
-    //
-    // 正在跑时**只给 spinner，不给静态图标**——两个都表示"进行中"，并排显示是重复，
-    // 视觉评审一眼就看出来了（"spinner 旁边还挂了一个沙漏，语义重复"）。
-    let hasIcon = MessageListMetrics.showsToolIcon(state) && !isRunning
-    symbol.isHidden = !hasIcon
-    if hasIcon {
-      symbol.image = UIImage(systemName: state.symbolName)
-      symbol.preferredSymbolConfiguration = UIImage.SymbolConfiguration(
-        font: .preferredFont(forTextStyle: .headline))
-      symbol.tintColor = .secondaryLabel
-    }
-    // 跑着的工具用 spinner（活的），其余停掉。
-    if isRunning {
+  override func configure(_ row: TranscriptRow) { configure(ToolActivityGroup(row)) }
+
+  func configure(_ group: ToolActivityGroup) {
+    super.configure(group.first)
+    // This is an activity sentence, not a card. No status badge or error-colored detail.
+    stack.backgroundColor = .clear
+    stack.layer.borderWidth = 0
+    stack.directionalLayoutMargins = .init(top: 4, leading: 0, bottom: 4, trailing: 0)
+    body.isHidden = true
+    let foreground = Self.color(for: group.foreground)
+    style(heading, .footnote, color: foreground)
+    setHeading(group.text, symbol: group.symbolName, color: foreground)
+    spinner.color = foreground
+    if group.showsSpinner {
       spinner.startAnimating()
     } else {
       spinner.stopAnimating()
     }
-    // 状态词**只在需要说明的时候出现**：运行中、失败。
-    //
-    // ## 为什么不给"完成"也加个 Done
-    //
-    // 上游 `tool-call-inline.vue` 的 `showPendingLabel` 就是 `title.pending`——
-    // 即它**只在未完成时显示状态词**，完成之后不贴任何标签：
-    //
-    // > Specialized panels describe successful results or attempted inputs. Failed
-    // > results use the shared diagnostic detail, without changing the neutral title.
-    //
-    // 这不只是省事。全部工具都会完成，给每一个都贴一个 "Done"，等于在一屏里重复
-    // 十几次同一句话——那是噪声，不是信息。真正需要说明的只有两种情况：
-    // 还在跑（用户要等着）、出错了（用户要留意）。
-    //
-    // 而且它顺手消掉了一个矛盾：曾出现"卡片写着 Done、下面一行红字说 Module not
-    // found"，两轮视觉评审都判定为"状态与内容打架"。原因是"完成"和"输出里有错误"
-    // 本来就是两件事，硬给它一个 Done 就等于替用户下了结论。现在不下了——
-    // 图标（对勾）表示跑完了，红字表示内容里有错误，各说各的事实。
-    let statusText = MessageListMetrics.toolStatusText(state: state)
-    stateLabel.text = statusText
-    stateLabel.isHidden = statusText == nil
-    // 跑着的工具要**看得出来在跑**。
-    //
-    // 视觉评审的原话：「三张卡扫一眼，两个实心黑对勾（已完成）最抓眼，唯一在跑的
-    // exec 卡反而最不显眼」——权重反了。用户正等着的那个恰恰最该被看见。
-    //
-    // 只给**进行中**用强调色，失败不用（见下面的规则）。这不矛盾：强调"正在发生"
-    // 是时间信息，而给失败染色是替用户下"任务失败"的结论——前者该醒目，后者不该。
-    let accent: UIColor = isRunning ? .tintColor : .secondaryLabel
-    stateLabel.textColor = accent
-    symbol.tintColor = .secondaryLabel
-    spinner.color = accent
+    // No tap affordance until the details flow exists. The first block's identifier stays
+    // stable; every member's name (including repeated names) remains available to VoiceOver.
+    accessibilityValue = group.showsSpinner ? MemohStrings.text("Running") : nil
+    updateAccessibility(group.first, content: [group.text] + group.accessibilityDescriptions.map { Optional($0) })
+  }
 
-    // 先算入参（它的可见性决定标题要不要让位），再算标题。
-    input.text = block.input?.preview
-    input.isHidden = input.text?.isEmpty != false
-    input.numberOfLines = MessageListMetrics.inputLineLimit
-    input.lineBreakMode = .byTruncatingTail
-    let font = UIFont.preferredFont(forTextStyle: .callout)
-    let mono = UIFont(descriptor: font.fontDescriptor.withDesign(.monospaced) ?? font.fontDescriptor, size: 0)
-    input.font = mono
-
-    // The upstream title is often the entire command. Don't let it bypass input limits.
-    let title = block.title.map { ToolInput.string($0).preview }
-    toolTitle.text = title
-    toolTitle.numberOfLines = 2
-    toolTitle.lineBreakMode = .byTruncatingTail
-    // 判定逻辑在 `MessageListMetrics`（Foundation-only，可单测）。
-    // 实测它值得单独立规则：`chat-tools` 场景里三张卡有两张把同一条命令写了两遍。
-    toolTitle.isHidden = !MessageListMetrics.showsToolTitle(
-      title: title, name: block.name, inputPreview: input.text)
-    // 工具结果的诊断。
-    //
-    // 之前这里只显示 `block.error`，而协议里工具块**没有** error 字段——所以这一行
-    // 从来都是空的，"构建失败"的工具看起来和成功的一模一样。视觉评审直接指出了
-    // 这个矛盾：「第三张卡写着 Done，下面的回复却说构建失败了」。
-    //
-    // 诊断要从 output 内部读（`isError` / `content[].text`），与上游一致。
-    // 读到了就显示，**但不给标题染色**——理由见上面那段规则。
-    let diagnosis = ToolResultDiagnosis.read(block.output)
-    let hasDiagnosis = diagnosis.text?.isEmpty == false
-    if hasDiagnosis, let text = diagnosis.text {
-      body.text = text
-      body.isHidden = false
-    } else {
-      body.text = block.error
-      body.isHidden = body.text?.isEmpty != false
-    }
-    // 诊断文字与入参同为"机器输出"，用同一套等宽字体。
-    // 之前诊断用正文字体、入参用等宽，同一种东西两种字体——两轮视觉评审都提了。
-    body.font = mono
-    body.numberOfLines = MessageListMetrics.inputLineLimit
-    body.lineBreakMode = .byTruncatingTail
-    // 诊断是**次要**信息（过程里的波折），用次要色，不与正文抢。真正的任务失败
-    // 由回合级错误块表达，那个才是醒目的。
-    //
-    // 但**错误内容本身要红**。这不是我猜的，是上游的做法：
-    // `tool-call-detail-generic.vue` 里 `errorText` 用 `text-destructive` 渲染，
-    // 而正常输出用 `text-foreground`。
-    //
-    // 于是出现一个看起来矛盾、其实不矛盾的情形：**卡片标题说 Done，输出是红的**。
-    // 两轮视觉评审都提出"状态与内容打架"。这里明确一次，免得下轮再改回去：
-    //
-    //   · 标题（Done/Running）= "这次工具调用**结束了**"，这是事实，也确实是
-    //     工具调用的终态——它跑完了。
-    //   · 红色正文 = "它吐出来的内容里有错误"，这也是事实。
-    //   · **"任务失败了"** 是另一件事，只能由 run 的终态（`errored`）表达，
-    //     不能从一次工具调用推导（第 15 条，上游明文规则）。
-    //
-    // 把标题改成 Failed 才是错的：agent 跑一个非零退出的命令、看一眼报错再修，
-    // 是它正常干活的方式。把它标成失败，用户会以为任务挂了。
-    body.textColor = diagnosis.isError ? .systemRed : .secondaryLabel
-    updateAccessibility(row, content: [heading.text, stateLabel.text,
-                                       toolTitle.isHidden ? nil : toolTitle.text,
-                                       input.text, body.text])
+  override func prepareForReuse() {
+    super.prepareForReuse()
+    spinner.stopAnimating()
   }
 }
 

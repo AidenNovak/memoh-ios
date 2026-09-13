@@ -15,8 +15,10 @@ import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'rea
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useT } from '../lib/i18n/useT.ts';
+import { GROUP_INSET, radius } from '../lib/theme/tokens.ts';
 import { usePalette, useTheme } from '../lib/theme/context.tsx';
 import { useSession, type SessionSummary } from '../features/session/store.tsx';
+import { sessionDisplayTitle } from '../features/session/displayTitle.ts';
 import {
   useSessionActivity,
   type SessionActivity,
@@ -96,23 +98,56 @@ export function HomeScreen() {
             alignItems: 'center',
             justifyContent: 'space-between',
             paddingHorizontal: spacing.lg,
-            paddingBottom: spacing.sm,
+            paddingBottom: spacing.md,
+            gap: spacing.sm,
           }}
         >
           <Text style={[typography.title2, { color: palette.label }]}>{t('home.title')}</Text>
-          <ConnectionBadge />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+            <ConnectionBadge />
+            {/* 新建会话放在标题行右侧，而不是右下角的浮动按钮。
+                FAB 是 Material 的形态，iOS 的"新建"在导航栏上——视觉评审
+                一眼就把它点出来了。没有原生导航栏时，这个位置最接近那个心智。 */}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('home.newSession')}
+              onPress={onNew}
+              hitSlop={8}
+              style={({ pressed }) => ({
+                width: 32,
+                height: 32,
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: pressed ? 0.6 : 1,
+              })}
+            >
+              <Text style={{ color: palette.accent, fontSize: 24, lineHeight: 28 }}>＋</Text>
+            </Pressable>
+          </View>
         </View>
         <PendingApprovals entries={pending} onOpen={onOpenActivity} />
         <ActiveRuns entries={active} />
       </View>
     ),
-    [active, onOpenActivity, palette.label, pending, spacing.lg, spacing.sm, t, typography.title2],
+    [
+      active,
+      onNew,
+      onOpenActivity,
+      palette.accent,
+      palette.label,
+      pending,
+      spacing.md,
+      spacing.lg,
+      spacing.sm,
+      t,
+      typography.title2,
+    ],
   );
 
   const empty = (
     <View style={{ paddingHorizontal: spacing.lg, paddingTop: spacing.xxl, alignItems: 'center' }}>
       <Text style={[typography.headline, { color: palette.label, marginBottom: spacing.xs }]}>
-        {currentBot === null ? t('home.empty.title') : t('home.empty.title')}
+        {t('home.empty.title')}
       </Text>
       <Text style={[typography.subhead, { color: palette.secondaryLabel, textAlign: 'center' }]}>
         {t('home.empty.body')}
@@ -134,25 +169,24 @@ export function HomeScreen() {
             tintColor={palette.secondaryLabel}
           />
         }
-        contentContainerStyle={{ paddingBottom: insets.bottom + 80 }}
-        renderItem={({ item }) => <SessionRow session={item} onPress={() => onOpen(item.id)} />}
+        contentContainerStyle={{
+          paddingBottom: insets.bottom + spacing.xl,
+          // 会话列表是一张 inset 分组卡片：左右留 16pt，行在卡片里。
+          // 之前是通栏白底行贴在灰底上（Web 表格的形态），视觉评审把它列为
+          // "不像原生 iOS"的头几条之一。
+          paddingHorizontal: GROUP_INSET,
+        }}
+        // 卡片：整段会话在一个圆角容器里，圆角只在首尾行生效。
+        style={{ flex: 1 }}
+        renderItem={({ item, index }) => (
+          <SessionRow
+            session={item}
+            first={index === 0}
+            last={index === sessions.length - 1}
+            onPress={() => onOpen(item.id)}
+          />
+        )}
       />
-
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={t('home.newSession')}
-        onPress={onNew}
-        style={({ pressed }) => [
-          styles.fab,
-          {
-            backgroundColor: palette.accent,
-            bottom: insets.bottom + spacing.lg,
-            opacity: pressed ? 0.85 : 1,
-          },
-        ]}
-      >
-        <Text style={styles.fabGlyph}>＋</Text>
-      </Pressable>
     </View>
   );
 }
@@ -191,15 +225,39 @@ function ActiveRuns({ entries }: { entries: SessionActivity[] }) {
 /**
  * 会话行。
  *
- * 两行结构：标题 + 副文本（预览），时间戳在**右侧**。之前时间戳挂在标题下方、
- * 分隔线通到屏幕边缘——这两点都让列表显得不像原生：扫列表时眼睛要换行去读时间，
- * 而通栏分隔线是 Web 表格的习惯。
+ * 两行结构，照 iOS 邮件/信息的形态：
  *
- * 原生列表的做法：时间戳右对齐（眼睛不换行），分隔线左缩进对齐文字起点，行高 64pt。
+ *   [标题 ................ 时间]   ← 第一行：主体 + 右对齐时间
+ *   [来源 · 类型]                  ← 第二行：次要信息
+ *
+ * 时间右对齐在第一行，是因为扫列表时眼睛不该换行——之前时间挤在副标题下面，
+ * 视觉评审直接指出"浪费高度、右侧全空"。
+ *
+ * 分隔线**左缩进对齐文字起点**（不是通栏）：通栏是 Web 表格的习惯。
+ * 圆角只在卡片的首尾行生效。
  */
-function SessionRow({ session, onPress }: { session: SessionSummary; onPress: () => void }) {
+function SessionRow({
+  session,
+  first,
+  last,
+  onPress,
+}: {
+  session: SessionSummary;
+  first: boolean;
+  last: boolean;
+  onPress: () => void;
+}) {
   const palette = usePalette();
   const { spacing, typography } = useTheme();
+  const t = useT();
+
+  // 卡片圆角只给首尾行：中间行不能圆，否则卡片中间会出现圆弧。
+  const corners = {
+    borderTopLeftRadius: first ? radius.md : 0,
+    borderTopRightRadius: first ? radius.md : 0,
+    borderBottomLeftRadius: last ? radius.md : 0,
+    borderBottomRightRadius: last ? radius.md : 0,
+  };
 
   return (
     <Pressable
@@ -207,36 +265,38 @@ function SessionRow({ session, onPress }: { session: SessionSummary; onPress: ()
       onPress={onPress}
       style={({ pressed }) => [
         styles.row,
+        corners,
         {
           backgroundColor: pressed ? palette.field : palette.card,
           paddingHorizontal: spacing.lg,
         },
       ]}
     >
-      <View style={{ flex: 1, marginRight: spacing.sm }}>
-        <Text style={[typography.body, { color: palette.label }]} numberOfLines={1}>
-          {session.title}
-        </Text>
-        <Text
-          style={[typography.footnote, { color: palette.secondaryLabel, marginTop: 2 }]}
-          numberOfLines={1}
-        >
+      <View style={{ flex: 1, gap: 1 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: spacing.sm }}>
+          <Text style={[typography.body, { color: palette.label, flex: 1 }]} numberOfLines={1}>
+            {sessionDisplayTitle(session, t)}
+          </Text>
+          <Text style={[typography.footnote, { color: palette.secondaryLabel }]}>
+            {formatRelative(session.updatedAt)}
+          </Text>
+        </View>
+        <Text style={[typography.footnote, { color: palette.secondaryLabel }]} numberOfLines={1}>
           {session.source}
         </Text>
       </View>
-      <Text style={[typography.footnote, { color: palette.tertiaryLabel }]}>
-        {formatRelative(session.updatedAt)}
-      </Text>
-      <View
-        style={{
-          position: 'absolute',
-          left: spacing.lg,
-          right: 0,
-          bottom: 0,
-          height: StyleSheet.hairlineWidth,
-          backgroundColor: palette.separator,
-        }}
-      />
+      {!last ? (
+        <View
+          style={{
+            position: 'absolute',
+            left: spacing.lg,
+            right: 0,
+            bottom: 0,
+            height: StyleSheet.hairlineWidth,
+            backgroundColor: palette.separator,
+          }}
+        />
+      ) : null}
     </Pressable>
   );
 }
@@ -257,23 +317,9 @@ function formatRelative(iso: string): string {
 
 const styles = StyleSheet.create({
   row: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    // 行高由内容决定（两行文字 + 上下 10pt），不低于 44pt 触控下限。
     minHeight: 56,
     justifyContent: 'center',
-  },
-  fab: {
-    position: 'absolute',
-    right: 20,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  fabGlyph: {
-    color: '#FFFFFF',
-    fontSize: 28,
-    lineHeight: 32,
-    fontWeight: '400',
+    paddingVertical: 10,
   },
 });

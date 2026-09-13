@@ -126,10 +126,12 @@ export const SCENES: Scene[] = [
     id: 'chat-tools',
     title: '工具调用：执行中 / 完成 / 输出里有错误',
     intent:
-      '三个状态必须一眼可辨，且**不靠颜色单独传达**（色盲与强光下都要能读）。' +
+      '连续工具合并为一行灰字，执行中靠行尾 spinner 表达，不靠颜色。' +
       '「输出里有错误」刻意不等于「失败」——协议层没有工具失败状态，' +
       '上游也明确说不能从一次工具调用推导任务失败（见 verified-behaviour 第 15 条）。',
-    expect: '每张卡片有状态的文字表达；执行中有一个正在转动的指示；错误正文标红但不给标题染色。',
+    expect:
+      '三个工具合成一行「执行了命令、编辑了文件」，前导工具图标、右侧一个 spinner；' +
+      '无卡片、无状态词、无红色诊断；VoiceOver 保留 exec、fs_write、exec 全部工具名。',
     frames: [
       emptySnapshot(),
       runningSnapshot(1),

@@ -25,7 +25,7 @@ final class NativeMessageList: ExpoView, UICollectionViewDelegate {
   private let bottomButton = UIButton(type: .system)
   private let emptyLabel = UILabel()
   private var source: UICollectionViewDiffableDataSource<Int, TranscriptRow.ID>!
-  private var rows: [TranscriptRow.ID: TranscriptRow] = [:]
+  private var rows: [TranscriptRow.ID: TranscriptDisplayRow] = [:]
   private var following = true
   private var applying = false
   private var decoding = false
@@ -39,7 +39,7 @@ final class NativeMessageList: ExpoView, UICollectionViewDelegate {
   private var readingAnchor: (TranscriptRow.ID, CGFloat)?
   private var interactionRevision = 0
   private var restoringAnchor = false
-  private var pendingRows: [TranscriptRow]?
+  private var pendingRows: [TranscriptDisplayRow]?
 
   required init(appContext: AppContext? = nil) {
     let layout = UICollectionViewCompositionalLayout { _, _ in
@@ -74,11 +74,13 @@ final class NativeMessageList: ExpoView, UICollectionViewDelegate {
       [weak self] collection, path, id in
       guard let self, let row = self.rows[id] else { return nil }
       let cell = collection.dequeueReusableCell(withReuseIdentifier: id.kind.rawValue, for: path)
-      if let reasoning = cell as? ReasoningMessageCell {
-        reasoning.configure(row, expanded: self.expansion.isExpanded(id))
+      if case .tools(let group) = row, let tool = cell as? ToolMessageCell {
+        tool.configure(group)
+      } else if let reasoning = cell as? ReasoningMessageCell {
+        reasoning.configure(row.first, expanded: self.expansion.isExpanded(id))
         reasoning.onToggle = { [weak self] in self?.toggleReasoning(id) }
       } else {
-        (cell as? MessageBlockCell)?.configure(row)
+        (cell as? MessageBlockCell)?.configure(row.first)
       }
       return cell
     }
@@ -161,7 +163,7 @@ final class NativeMessageList: ExpoView, UICollectionViewDelegate {
       self.decoding = true
       Task { @MainActor [weak self] in
         let result = await Task.detached(priority: .userInitiated) {
-          Result { try TranscriptRow.decode(json) }
+          Result { TranscriptDisplayRow.grouped(try TranscriptRow.decode(json)) }
         }.value
         guard let self else { return }
         self.decoding = false
@@ -181,7 +183,7 @@ final class NativeMessageList: ExpoView, UICollectionViewDelegate {
     }
   }
 
-  private func apply(_ incoming: [TranscriptRow]) {
+  private func apply(_ incoming: [TranscriptDisplayRow]) {
     // A decode can finish while a disclosure-triggered snapshot is still applying.
     guard !applying else { pendingRows = incoming; return }
     let old = source.snapshot()
@@ -226,7 +228,7 @@ final class NativeMessageList: ExpoView, UICollectionViewDelegate {
   }
 
   private func toggleReasoning(_ id: TranscriptRow.ID) {
-    guard rows[id]?.block.kind == .reasoning else { return }
+    guard rows[id]?.id.kind == .reasoning else { return }
     // Expanding content is an explicit reading action, even if the list was following.
     beginReading()
     expansion.toggle(id)

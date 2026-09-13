@@ -42,6 +42,16 @@ import {
   type ChatState,
 } from './reducer-exports.ts';
 
+/**
+ * 会话在列表里的摘要。
+ *
+ * `title` **可能是空字符串**：服务端允许没有标题（新会话、从 IM 频道建的会话等）。
+ * 之前这里用 `id.slice(0,8)` 兜底，结果界面上出现 "fixture-a3f2…" 这种 id 片段——
+ * 对用户毫无意义，而且看起来像没做完。
+ *
+ * 现在保持原样（可能为空），显示时用 `sessionDisplayTitle()`，它走 i18n。
+ * 放在渲染层而不是这里的原因：语言可以切换，本地化字符串不该固化进数据。
+ */
 export interface SessionSummary {
   id: string;
   title: string;
@@ -220,7 +230,7 @@ export function SessionProvider({
       const response = await client.listSessions(currentBotId, { limit: 50 });
       const sessions: SessionSummary[] = (response.items ?? []).map((item: MemohSession) => ({
         id: item.id,
-        title: item.title !== '' ? item.title : item.id.slice(0, 8),
+        title: item.title,
         updatedAt: item.updated_at,
         source: [item.channel_type, item.type].filter((part) => part !== '').join(' · '),
       }));
@@ -339,7 +349,7 @@ export function SessionProvider({
       const session = await client.getSession(currentBotId, sessionId);
       const summary: SessionSummary = {
         id: session.id,
-        title: session.title !== '' ? session.title : session.id.slice(0, 8),
+        title: session.title,
         updatedAt: session.updated_at,
         source: [session.channel_type, session.type].filter((part) => part !== '').join(' · '),
       };
