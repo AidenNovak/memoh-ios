@@ -1,0 +1,37 @@
+node_modules/
+.pnpm-store/
+
+# Expo / RN
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# 原生工程是 prebuild 产物，不入库
+apps/mobile/ios/
+apps/mobile/android/
+apps/mobile/*.jks
+apps/mobile/*.p8
+apps/mobile/*.p12
+apps/mobile/*.mobileprovision
+apps/mobile/*.keystore
+
+# 验收产物
+apps/mobile/verification/.artifacts/
+apps/mobile/verification/**/.derived-data/
+# 证据是二进制（截图/录屏）且每轮都新增，默认不入库；要留档用 CI artifact，
+# 或显式 `git add -f` 某一轮。
+apps/mobile/verification/ui/results/
+.verify/
+
+# 本机密文（绝不入库）
+.env
+.env.*
+!.env.example
+*.local
+secrets/
+
+# 系统
+.DS_Store
+*.log
+tmp/

@@ -1,0 +1,12 @@
+packages:
+  - 'apps/*'
+
+# Lody iOS 用 hoisted 是因为它有 vendored 的 @expo/dom-webview。Memoh 没有 vendored
+# 包，但 hoisted 仍然有价值：Swift/CocoaPods 工具链与 Metro 只解析到一份依赖，
+# 减少 prebuild 时的惊喜。如果你要引入只认 node_modules 扁平布局的工具，别改这里，
+# 先在 apps/mobile 里局部解决。
+nodeLinker: hoisted
+
+# postinstall 脚本默认被 pnpm 拦截；这些包需要执行（原生工程的常规依赖）。
+onlyBuiltDependencies:
+  - esbuild

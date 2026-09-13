@@ -1,0 +1,45 @@
+# 静态检查：类型、i18n、格式，加上验收基建自身的单测。
+#
+# 这里刻意不碰 Xcode：这些检查必须在 30 秒量级给出"代码本身是否自洽"的答复，
+# 而不是等一台模拟器。行为验收在 verify.yml（macOS）里跑。
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # 等 pnpm-lock.yaml 入库后改成 --frozen-lockfile：那时它才真的能防漂移。
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Typecheck, i18n and format
+        run: pnpm check
+
+      # 纯逻辑单测 + 验收基建自身的单测（simulator/build/runner），不需要模拟器。
+      - name: Unit tests
+        run: pnpm test

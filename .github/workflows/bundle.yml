@@ -1,0 +1,54 @@
+# 打包冒烟：证明 JS bundle 能产出，不涉及签名、不涉及 Xcode。
+#
+# Metro 的打包在 Linux 上就能跑（bundle 是 JS，跟 Xcode 无关），所以这条放到
+# ubuntu 上：它便宜、够快，而且能把"只有 iOS 构建才会炸的打包错误"提前暴露。
+name: bundle
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: bundle-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CI: '1'
+  EXPO_NO_TELEMETRY: '1'
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Export the iOS bundle
+        run: pnpm bundle
+
+      # 只有失败时才需要看产物；成功时 bundle 本身已经证明了要证明的事。
+      - name: Upload the bundle on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ github.sha }}
+          path: apps/mobile/.expo/export-check
+          retention-days: 7
+          if-no-files-found: ignore

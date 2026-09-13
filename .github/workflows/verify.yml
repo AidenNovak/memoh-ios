@@ -1,0 +1,191 @@
+# 行为验收：原生检查 + Debug 构建 + UI 行为基线。全部在 macOS 上跑。
+#
+# 三层分工（越往上越贵、越接近用户能看见的东西）：
+#   native —— 生产 Swift 类型的行为，不碰 UI 像素
+#   build  —— 只构建一次 Debug 模拟器 App，把产物当 artifact 往下传
+#   ui     —— 一个 Metro，分批并行跑 case，证据（截图/录屏）逐轮上传
+#
+# 三个 job 都要配成 branch rules 的 required checks，否则它们只是"绿了个寂寞"。
+#
+# 缓存策略：
+#   * pnpm store 走 setup-node 的内置缓存（key 含 pnpm-lock.yaml）。
+#   * CocoaPods 只缓存下载缓存，不缓存 Pods/；key 用原生工程的输入
+#     （app.config.ts + package.json），Pods 本身会随依赖变化而失效。
+#   * DerivedData 刻意不缓存：它是 per-checkout 的共享缓存，体积以 GB 计，
+#     跨提交复用会把过期产物带进验收（宁可冷编，也不能拿旧产物当结论）。
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # 离线验收闸门：只有 Debug bundle 才看得到这个值，生产构建取不到。
+  EXPO_PUBLIC_UI_VERIFY: '1'
+  CI: '1'
+  EXPO_NO_TELEMETRY: '1'
+
+jobs:
+  # 生产 Swift 的行为检查：租一台模拟器，编译并在里面跑 harness。
+  native:
+    runs-on: macos-26
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          xcrun simctl list runtimes
+
+      # 不传 --udid 时 native.py 自己走 simulator.py 的租约。
+      - name: Native behavior checks
+        run: pnpm verify:native
+
+      - name: Purge the verification Simulators
+        if: always()
+        run: cd apps/mobile && python3 verification/simulator.py --purge
+
+  # 只构建一次：三个 batch 消费同一个 App，而不是各建一次。
+  build:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/CocoaPods
+          key: pods-${{ runner.os }}-${{ hashFiles('apps/mobile/app.config.ts', 'apps/mobile/package.json') }}
+          restore-keys: pods-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          pod --version
+
+      # ios/ 是 prebuild 产物；验收构建从 app config 生成它，从不手改生成物。
+      - name: Generate the native project
+        run: pnpm prebuild
+
+      - name: Install Pods
+        run: pnpm --filter @memoh-ios/mobile pods
+
+      # 构建在租约里跑，因此只有一个目的地、一个架构；--silent 让 stdout 上
+      # 只剩 App 路径，别的都走 stderr。
+      - name: Build the Debug Simulator app
+        run: |
+          set -euo pipefail
+          cd apps/mobile
+          APP=$(python3 verification/simulator.py --name 'CI build' --shutdown-after -- pnpm --silent verify:build)
+          echo "APP=$APP" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/app"
+          tar -czf "$RUNNER_TEMP/memoh-simulator.tar.gz" -C "$(dirname "$APP")" "$(basename "$APP")"
+
+      - name: Upload the built app
+        uses: actions/upload-artifact@v4
+        with:
+          name: memoh-simulator
+          path: ${{ runner.temp }}/memoh-simulator.tar.gz
+          retention-days: 3
+
+      - name: Upload the build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: apps/mobile/verification/.artifacts/build.log
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Purge the verification Simulators
+        if: always()
+        run: cd apps/mobile && python3 verification/simulator.py --purge
+
+  # 一个 Metro，N 台租约设备，分批并行跑 case。一个 batch 失败不取消兄弟。
+  ui:
+    needs: build
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Download the built app
+        uses: actions/download-artifact@v4
+        with:
+          name: memoh-simulator
+          path: ${{ runner.temp }}/app
+
+      - name: Unpack the app
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/unpacked"
+          tar -xzf "$RUNNER_TEMP/app/memoh-simulator.tar.gz" -C "$RUNNER_TEMP/unpacked"
+          APP=$(find "$RUNNER_TEMP/unpacked" -maxdepth 2 -name '*.app' -type d | head -1)
+          test -n "$APP"
+          echo "APP=$APP" >> "$GITHUB_ENV"
+
+      # --parallel 自己租设备、自己起一个 Metro：不传 --udid。
+      # 设备数按现在只有一个 batch 设成 2，batch 变多后调大即可。
+      - name: UI behavior baselines
+        run: |
+          cd apps/mobile
+          python3 verification/ui/run.py --app "$APP" --parallel 2 --language en --appearance both
+
+      - name: Upload the evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-evidence
+          path: apps/mobile/verification/ui/results
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Purge the verification Simulators
+        if: always()
+        run: cd apps/mobile && python3 verification/simulator.py --purge
