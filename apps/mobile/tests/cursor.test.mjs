@@ -7,7 +7,37 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { HEARTBEAT_INTERVAL_MS, judgeDelta, judgeSnapshot, reconnectDelay } from '../src/api/cursor.ts';
+import {
+  HEARTBEAT_INTERVAL_MS,
+  judgeDelta,
+  judgeSnapshot,
+  reconnectDelay,
+} from '../src/api/cursor.ts';
+import { realtimeUrl } from '../src/api/realtime.ts';
+
+test('realtimeUrl 拼出完整的 bot 路径', () => {
+  // 这个断言来自一次真实故障：漏掉 bot 段会连到根路径拿 404，
+  // 而现象看起来像"连接不稳"（一直重连），排查成本很高。
+  assert.equal(
+    realtimeUrl('http://127.0.0.1:18080', 'abc-123'),
+    'ws://127.0.0.1:18080/bots/abc-123/web/ws',
+  );
+});
+
+test('realtimeUrl 处理 https 与末尾斜杠', () => {
+  assert.equal(
+    realtimeUrl('https://memoh.example.com/', 'bot-1'),
+    'wss://memoh.example.com/bots/bot-1/web/ws',
+  );
+  assert.equal(
+    realtimeUrl('https://memoh.example.com///', 'bot-1'),
+    'wss://memoh.example.com/bots/bot-1/web/ws',
+  );
+});
+
+test('realtimeUrl 对 bot id 做转义', () => {
+  assert.equal(realtimeUrl('http://x', 'a/b'), 'ws://x/bots/a%2Fb/web/ws');
+});
 
 test('连续帧被应用，游标前进', () => {
   const verdict = judgeDelta({ epoch: 'e1', seq: 41 }, { epoch: 'e1', seq: 42 });

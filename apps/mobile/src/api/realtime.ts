@@ -68,18 +68,67 @@ export interface RealtimeListener {
 }
 
 export interface RealtimeOptions {
-  /** 形如 `wss://memoh.example.com`。由 HTTP baseUrl 推导。 */
-  wsUrl: string;
+  /**
+   * HTTP base URL，形如 `https://memoh.example.com`。
+   *
+   * **不要在这里传一个完整的 ws:// 地址**——路径由这个类自己拼（`/bots/{botId}/web/ws`）。
+   * 让调用方拼路径是个反复出错的点：漏掉 bot 段就会连到根路径拿 404，而且看起来
+   * 像是"连接不稳"而不是"地址写错了"。
+   */
+  baseUrl: string;
+  /** 这条连接服务的 bot。 */
+  botId: string;
   /** 每次建连时调用，拿最新 token（不要缓存到闭包外）。 */
   getToken: () => string | null;
   listener: RealtimeListener;
+  /**
+   * 建 WebSocket 的方式。默认用运行时的全局 `WebSocket`（iOS 上就是 RN 的实现，
+   * 它支持 `{ headers }` 第三参数）。抽出来是为了让 Node 下的集成测试能注入一个
+   * 支持 header 的实现（Node 内置的 WebSocket 不支持），而不是在源码里做环境判断。
+   */
+  createSocket?: SocketFactory;
 }
 
-function toWebSocketUrl(baseUrl: string): string {
+/** 建一条已带上鉴权的 WebSocket。抛出即视为建连失败，会走重连。 */
+export type SocketFactory = (url: string, token: string) => WebSocket;
+
+/** HTTP base URL → WebSocket origin。 */
+function toWebSocketOrigin(baseUrl: string): string {
   if (baseUrl.startsWith('https://')) return `wss://${baseUrl.slice('https://'.length)}`;
   if (baseUrl.startsWith('http://')) return `ws://${baseUrl.slice('http://'.length)}`;
   return baseUrl;
 }
+
+/**
+ * 拼出这条连接要连的完整地址。
+ *
+ * 单独成一个导出的纯函数是为了能被测：漏掉 bot 段会导致 404，而现象看起来像
+ * "连接不稳"（一直重连），排查成本很高。
+ */
+export function realtimeUrl(baseUrl: string, botId: string): string {
+  const origin = toWebSocketOrigin(baseUrl).replace(/\/+$/, '');
+  return `${origin}/bots/${encodeURIComponent(botId)}/web/ws`;
+}
+
+/**
+ * 默认的建连方式：用运行时的全局 `WebSocket`。
+ *
+ * 在 iOS 上这就是 React Native 的实现，它接受第三个 options 参数（`{ headers }`）——
+ * 原生客户端走 `Authorization`，不用 `?token=`（那条是给浏览器的妥协，因为浏览器
+ * 的 WebSocket 设不了 header）。
+ *
+ * 类型上需要显式声明这个构造签名：RN 支持它，但 DOM 的 `WebSocket` 类型定义不认。
+ */
+const defaultSocketFactory: SocketFactory = (url, token) => {
+  const WebSocketWithOptions = WebSocket as unknown as new (
+    url: string,
+    protocols: string | string[] | undefined,
+    options: { headers: Record<string, string> },
+  ) => WebSocket;
+  return new WebSocketWithOptions(url, undefined, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+};
 
 /** 客户端生成的幂等键。没有 crypto.randomUUID 的运行时用降级实现。 */
 function uuid(): string {
@@ -95,6 +144,7 @@ function uuid(): string {
 
 export class MemohRealtime {
   private readonly wsUrl: string;
+  private readonly createSocket: SocketFactory;
   private readonly getToken: () => string | null;
   private readonly listener: RealtimeListener;
 
@@ -109,9 +159,15 @@ export class MemohRealtime {
   private disposed = false;
 
   constructor(options: RealtimeOptions) {
-    this.wsUrl = toWebSocketUrl(options.wsUrl);
+    this.wsUrl = realtimeUrl(options.baseUrl, options.botId);
     this.getToken = options.getToken;
     this.listener = options.listener;
+    this.createSocket = options.createSocket ?? defaultSocketFactory;
+  }
+
+  /** 实际会连的地址。诊断用。 */
+  get url(): string {
+    return this.wsUrl;
   }
 
   get connectionState(): ConnectionState {
@@ -271,28 +327,11 @@ export class MemohRealtime {
 
     let socket: WebSocket;
     try {
-      // 原生客户端走 Authorization header。RN 的 WebSocket 支持第三个 options
-      // 参数（`{ headers }`），但 DOM 的类型定义不认——所以这里用一个显式的构造
-      // 签名声明，而不是 `as never` 把类型关掉。
-      const WebSocketWithOptions = WebSocket as unknown as new (
-        url: string,
-        protocols: string | string[] | undefined,
-        options: { headers: Record<string, string> },
-      ) => WebSocket;
-      socket = new WebSocketWithOptions(this.wsUrl, undefined, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-    } catch {
-      // 退路：服务端也接受 `?token=`（那是浏览器的限制导致的兼容路径）。
-      try {
-        socket = new WebSocket(
-          `${this.wsUrl}${this.wsUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`,
-        );
-      } catch (error) {
-        this.listener.onError?.(error instanceof Error ? error : new Error(String(error)));
-        this.scheduleReconnect();
-        return;
-      }
+      socket = this.createSocket(this.wsUrl, token);
+    } catch (error) {
+      this.listener.onError?.(error instanceof Error ? error : new Error(String(error)));
+      this.scheduleReconnect();
+      return;
     }
 
     this.socket = socket;
@@ -475,7 +514,8 @@ export class MemohRealtime {
     const sessionId = frame.session_id;
     const epoch = frame.epoch;
     const seq = frame.seq;
-    if (typeof sessionId !== 'string' || typeof epoch !== 'string' || typeof seq !== 'number') return;
+    if (typeof sessionId !== 'string' || typeof epoch !== 'string' || typeof seq !== 'number')
+      return;
 
     // snapshot 是权威状态，直接覆盖本地游标——不存在"比本地旧"的合法情况。
     this.subscriptions.set(sessionId, judgeSnapshot({ epoch, seq }));

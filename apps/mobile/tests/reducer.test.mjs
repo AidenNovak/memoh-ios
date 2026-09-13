@@ -36,7 +36,8 @@ function toolMessage(id, name, running, options) {
     name,
     running,
     input: { command: `${name} --flag` },
-    approval: options === undefined ? undefined : { approval_id: `a${id}`, status: 'pending', options },
+    approval:
+      options === undefined ? undefined : { approval_id: `a${id}`, status: 'pending', options },
   };
 }
 
@@ -246,7 +247,12 @@ test('agent 提问被提取成待回应', () => {
           user_input_id: 'u1',
           status: 'pending',
           questions: [
-            { id: 'q1', text: 'Which branch?', kind: 'single_choice', options: [{ id: 'main', label: 'main' }] },
+            {
+              id: 'q1',
+              text: 'Which branch?',
+              kind: 'single_choice',
+              options: [{ id: 'main', label: 'main' }],
+            },
           ],
         },
       },
@@ -286,7 +292,10 @@ test('轮次按 turn_position 排序，不靠时间戳', () => {
     ],
     {},
   );
-  assert.deepEqual(turns.map((turn) => turn.key), ['a', 'b']);
+  assert.deepEqual(
+    turns.map((turn) => turn.key),
+    ['a', 'b'],
+  );
 });
 
 test('乐观消息在服务端确认后由 snapshot 清掉', () => {
@@ -325,13 +334,19 @@ test('turnsForDisplay 把历史、活跃、乐观三层拼起来', () => {
   ]);
   state = applyDelta(state, 'e1', 1, {
     message_upserts: [textMessage(1, 'live output', false)],
-    current_run_view: { run_id: 'r1', status: 'running', messages: [textMessage(1, 'live output', false)] },
+    current_run_view: {
+      run_id: 'r1',
+      status: 'running',
+      messages: [textMessage(1, 'live output', false)],
+    },
   });
   state = appendOptimisticUserMessage(state, 'newest', 'inv-3');
 
   const turns = turnsForDisplay(state);
   const contents = turns.flatMap((turn) =>
-    [...(turn.user?.blocks ?? []), ...(turn.assistant?.blocks ?? [])].map((block) => block.text ?? ''),
+    [...(turn.user?.blocks ?? []), ...(turn.assistant?.blocks ?? [])].map(
+      (block) => block.text ?? '',
+    ),
   );
 
   assert.ok(contents.includes('old'));
@@ -345,7 +360,11 @@ test('hasContent 过滤空轮次', () => {
     hasContent({
       key: 'x',
       position: 0,
-      user: { key: 'x', role: 'user', blocks: [{ kind: 'text', key: 'k', text: 'hi', streaming: false }] },
+      user: {
+        key: 'x',
+        role: 'user',
+        blocks: [{ kind: 'text', key: 'k', text: 'hi', streaming: false }],
+      },
       active: false,
     }),
     true,
@@ -378,7 +397,9 @@ test('工具状态判定：running / done / 未知', () => {
 
 test('工具卡片的标题优先取 input.command', () => {
   const state = applyDelta(initialChatState, 'e1', 1, {
-    message_upserts: [{ id: 1, type: 'tool', name: 'exec', running: true, input: { command: 'ls -la' } }],
+    message_upserts: [
+      { id: 1, type: 'tool', name: 'exec', running: true, input: { command: 'ls -la' } },
+    ],
   });
   const blocks = turnsForDisplay(state).flatMap((turn) => turn.assistant?.blocks ?? []);
   assert.equal(blocks[0].title, 'ls -la');

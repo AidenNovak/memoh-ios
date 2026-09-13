@@ -151,12 +151,29 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(sorted(seen), sorted(runner.CASES))
         self.assertEqual(len(seen), len(set(seen)))
 
+    def test_live_cases_stay_out_of_the_default_selection(self):
+        """默认选择必须能在空手上复现，所以不能包含依赖外部服务端的 case。"""
+        runner = load_runner()
+        default = runner.plan_cases()
+        offenders = [case.name for case in default if case.requires_live]
+
+        self.assertEqual(offenders, [], '这些 case 需要外部服务，不该进默认选择')
+
+        # 反过来：请求 live 批次时必须能拿到它——否则这个标志就成了黑洞。
+        live = runner.plan_cases(batch='live')
+        self.assertTrue(live, 'live 批次不能是空的')
+        self.assertTrue(all(case.requires_live for case in live))
+
 
 class PlanningTests(unittest.TestCase):
-    def test_the_default_selection_is_every_case(self):
+    def test_the_default_selection_is_every_case_that_needs_nothing_external(self):
         runner = load_runner()
+        default = [case.name for case in runner.plan_cases()]
 
-        self.assertEqual([case.name for case in runner.plan_cases()], list(runner.CASES))
+        expected = [name for name, case in runner.CASES.items() if not case.requires_live]
+        self.assertEqual(default, expected)
+        # 且默认选择不能是空的——那会让"跑验收"变成什么都没跑还报成功。
+        self.assertTrue(default, '默认选择不能为空')
 
     def test_a_batch_selects_its_cases_and_a_case_overrides_it(self):
         runner = load_runner()

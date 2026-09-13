@@ -15,35 +15,44 @@ import { ActivityIndicator, View } from 'react-native';
 
 import { MemohClient } from '../../api/client.ts';
 import { loadSession, shouldRefresh, getFreshToken, saveSession } from '../../api/credentials.ts';
+import { bootstrapFromVerifySeed, type VerifyBootstrap } from '../verify/bootstrap.ts';
 import { LoginScreen } from '../../screens/LoginScreen.tsx';
 import { useT } from '../../lib/i18n/useT.ts';
 import { usePalette } from '../../lib/theme/context.tsx';
 import type { SessionSeed } from '../session/store.tsx';
 
 interface GateProps {
-  children: (seed: SessionSeed) => React.ReactNode;
   /**
-   * 跳过 Keychain，直接用一个给定的凭据进入 App。
-   * 只给 Debug / 验收场景用——生产路径永远走 Keychain。
+   * 第二个参数是验收种子（只在开发构建里非 null）。外壳用它决定要不要自动跑
+   * 一段脚本化动作。
    */
-  debugSeed?: SessionSeed;
+  children: (seed: SessionSeed, verify: VerifyBootstrap | null) => React.ReactNode;
 }
 
 type Phase = 'checking' | 'signedOut' | 'signedIn';
 
-export function AuthGate({ children, debugSeed }: GateProps) {
+export function AuthGate({ children }: GateProps) {
   const palette = usePalette();
   const t = useT();
-  const [phase, setPhase] = useState<Phase>(debugSeed ? 'signedIn' : 'checking');
-  const [seed, setSeed] = useState<SessionSeed | null>(debugSeed ?? null);
+  const [phase, setPhase] = useState<Phase>('checking');
+  const [seed, setSeed] = useState<SessionSeed | null>(null);
+  const [verify, setVerify] = useState<VerifyBootstrap | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // 启动时读一次 Keychain，并顺手做一次静默续期。
   useEffect(() => {
-    if (debugSeed) return;
     let cancelled = false;
 
     void (async () => {
+      // 验收种子优先：它只在开发构建里存在，且没有种子时立刻返回 null。
+      const bootstrap = await bootstrapFromVerifySeed();
+      if (cancelled) return;
+      if (bootstrap !== null) {
+        setVerify(bootstrap);
+        setSeed(bootstrap.seed);
+        setPhase('signedIn');
+        return;
+      }
+
       const stored = await loadSession();
       if (cancelled) return;
       if (stored === null || getFreshToken() === null) {
@@ -64,7 +73,11 @@ export function AuthGate({ children, debugSeed }: GateProps) {
       if (shouldRefresh()) {
         try {
           const refreshed = await client.refresh();
-          await saveSession({ ...stored, token: refreshed.access_token, expiresAt: refreshed.expires_at });
+          await saveSession({
+            ...stored,
+            token: refreshed.access_token,
+            expiresAt: refreshed.expires_at,
+          });
         } catch {
           // 续期失败但 token 未过期时照常进入；真过期了会在首个请求上 401。
         }
@@ -78,25 +91,35 @@ export function AuthGate({ children, debugSeed }: GateProps) {
     return () => {
       cancelled = true;
     };
-  }, [debugSeed]);
+  }, []);
 
   const handleSignedIn = useCallback((nextSeed: SessionSeed) => {
     setSeed(nextSeed);
+    setVerify(null);
     setError(null);
     setPhase('signedIn');
   }, []);
 
   if (phase === 'checking') {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: palette.groupedBackground }}>
+      <View
+        style={{
+          flex: 1,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: palette.groupedBackground,
+        }}
+      >
         <ActivityIndicator color={palette.accent} />
       </View>
     );
   }
 
   if (phase === 'signedOut' || seed === null) {
-    return <LoginScreen onSignedIn={handleSignedIn} notice={error === null ? undefined : t(error)} />;
+    return (
+      <LoginScreen onSignedIn={handleSignedIn} notice={error === null ? undefined : t(error)} />
+    );
   }
 
-  return <>{children(seed)}</>;
+  return <>{children(seed, verify)}</>;
 }

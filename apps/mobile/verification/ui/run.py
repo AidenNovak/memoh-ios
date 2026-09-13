@@ -55,6 +55,8 @@ class Case:
     appearances: tuple = APPEARANCES
     timeout: int = 180
     scene: str = ''
+    # 需要外部服务端才能跑。**不能进默认选择**——验收基线的定义就是"空手也能复现"。
+    requires_live: bool = False
 
     def evidence(self):
         parts = [f'screenshot {name}' for name in self.screenshots]
@@ -73,8 +75,22 @@ CASES = {
         scene='App 的真实首屏（冷启动，不注入任何 fixture）',
         timeout=180,
     ),
+    'chat-roundtrip': Case(
+        name='chat-roundtrip',
+        batch='live',
+        description='连真实 Memoh 服务端跑完一轮对话：登录 → 会话 → 发送 → 收到流式回复',
+        script=CASES_DIR / 'chat-roundtrip.py',
+        # 每一步都留证据：首页、输入器、回复、稳定态。
+        screenshots=('home', 'composer', 'reply', 'settled'),
+        scene='真实服务端往返（需要 pnpm dev:env 隧道 + 服务器上已配好 bot 与模型）',
+        timeout=600,
+        requires_live=True,
+    ),
 }
-BATCHES = {'launch': ['app-launch']}
+BATCHES = {
+    'launch': ['app-launch'],
+    'live': ['chat-roundtrip'],
+}
 
 
 class CaseFailure(RuntimeError):
@@ -93,7 +109,10 @@ def plan_cases(case_names=None, batch=None):
     elif case_names:
         names = list(case_names)
     else:
-        names = [case.name for case in CASES.values()]
+        # 默认只跑不依赖外部服务的 case。要跑 live 的必须显式
+        # `--batch live` 或 `--case <名字>`——验收基线是"空手能复现"，
+        # 而依赖服务端的检查做不到这一点，混进来只会让基线变得不可信。
+        names = [case.name for case in CASES.values() if not case.requires_live]
     unknown = [name for name in names if name not in CASES]
     if unknown:
         raise SystemExit(f'unknown case(s): {", ".join(unknown)}; run --list to see them')

@@ -23,27 +23,27 @@
 
 顶层 5 个 + dev-only 1 个。所有业务路由需 auth（`router.ts:259-290`）。
 
-| 路径 | 页面 | 性质 |
-|---|---|---|
-| `/` | **渲染 null**，chat UI 常驻挂载在 App.vue | 落地页 = Chat |
-| `/bot/:botName?` | 同上，仅同步 URL | Chat |
-| `/settings/*` | 15 个子路由 | 配置/查看混合 |
-| `/onboarding` | 5 步向导 | 首次配置 |
-| `/login` | 登录 | — |
+| 路径             | 页面                                      | 性质          |
+| ---------------- | ----------------------------------------- | ------------- |
+| `/`              | **渲染 null**，chat UI 常驻挂载在 App.vue | 落地页 = Chat |
+| `/bot/:botName?` | 同上，仅同步 URL                          | Chat          |
+| `/settings/*`    | 15 个子路由                               | 配置/查看混合 |
+| `/onboarding`    | 5 步向导                                  | 首次配置      |
+| `/login`         | 登录                                      | —             |
 
 `/settings` 子路由（`router.ts:61-208`）：
 
-| 页面 | 性质 | iOS 取舍 |
-|---|---|---|
-| `bots`（含 new/progress/:botName） | bot 列表 + 详情 **18 个 tab**（`bots/detail.vue:417-437`） | **列表保留；详情降级**为 overview/schedule/channels 状态查看 |
-| `providers` / `web-search` / `memory` / `voice` / `video` / `email` | 同一模式：BackendCard 列表 + provider 模板表单，**全部配置重型** | **砍**。只读状态并入"设置→能力"一页 |
-| `runtimes` | runtime 管理 | **砍**（查看态并入 bot 详情） |
-| `usage` | token 用量图表（`usage/index.vue:1-31`） | **保留**（查看型，天然适合手机） |
-| `people` | 成员表格，adminOnly | **砍** |
-| `supermarket` | skills/connectors 商店 | **降级**为浏览（安装回 Web），MVP 砍 |
-| `appearance` / `profile` / `about` | 轻表单 | **保留**（原生 Settings 形态） |
-| `keyboard` | 桌面快捷键 | **砍** |
-| `memory-graph` | 记忆图谱可视化 | **砍**（Web 差异化能力） |
+| 页面                                                                | 性质                                                             | iOS 取舍                                                     |
+| ------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------ |
+| `bots`（含 new/progress/:botName）                                  | bot 列表 + 详情 **18 个 tab**（`bots/detail.vue:417-437`）       | **列表保留；详情降级**为 overview/schedule/channels 状态查看 |
+| `providers` / `web-search` / `memory` / `voice` / `video` / `email` | 同一模式：BackendCard 列表 + provider 模板表单，**全部配置重型** | **砍**。只读状态并入"设置→能力"一页                          |
+| `runtimes`                                                          | runtime 管理                                                     | **砍**（查看态并入 bot 详情）                                |
+| `usage`                                                             | token 用量图表（`usage/index.vue:1-31`）                         | **保留**（查看型，天然适合手机）                             |
+| `people`                                                            | 成员表格，adminOnly                                              | **砍**                                                       |
+| `supermarket`                                                       | skills/connectors 商店                                           | **降级**为浏览（安装回 Web），MVP 砍                         |
+| `appearance` / `profile` / `about`                                  | 轻表单                                                           | **保留**（原生 Settings 形态）                               |
+| `keyboard`                                                          | 桌面快捷键                                                       | **砍**                                                       |
+| `memory-graph`                                                      | 记忆图谱可视化                                                   | **砍**（Web 差异化能力）                                     |
 
 ### 1.2 Web 导航结构（`src/layout/` + `src/components/sidebar/`）
 
@@ -53,16 +53,16 @@
 
 ### 1.3 关键能力裁决
 
-| 能力 | Web 实现 | iOS 裁决 | 依据 |
-|---|---|---|---|
-| 容器桌面串流 | WebRTC `<video>` + 键鼠回传（`display-pane.vue:883-895`） | **砍**。MVP 不做；远期可做"看"不做"控" | 手机屏上远程桌面是伪需求，键鼠回传在小屏无意义 |
-| 终端 | xterm pane（`terminal-pane.vue`） | **砍**。远期只读 tail | 手机打字进终端体验极差 |
-| dockview 多 pane 分屏 | chat/file/preview/asset/terminal/browser 六 pane（`chat-workspace.vue:43-48`） | **砍**，改为全屏页间切换 | 手机没有多窗格空间 |
-| Chat 流式 + 工具调用 + 审批 | local-channel WS（swagger `:10417`）、composer-panel-approval | **全量保留，原生实现** | 核心价值 |
-| 会话/文件/定时任务 | 侧栏三 panel | **保留**，files 只读浏览 + 预览 | swagger containerd 域有完整文件 CRUD |
-| 用量 | 图表 + 过滤器 | **保留** | 查看型 |
-| provider 配置族 | 6 页表单 | **砍**为只读状态行 | 手机上是"看状态"不是"全量编辑" |
-| onboarding 建 bot | 5 步向导 | **砍**。手机上不允许创建 bot，提示去 Web | 创建涉及 provider 选择等重决策 |
+| 能力                        | Web 实现                                                                       | iOS 裁决                                 | 依据                                           |
+| --------------------------- | ------------------------------------------------------------------------------ | ---------------------------------------- | ---------------------------------------------- |
+| 容器桌面串流                | WebRTC `<video>` + 键鼠回传（`display-pane.vue:883-895`）                      | **砍**。MVP 不做；远期可做"看"不做"控"   | 手机屏上远程桌面是伪需求，键鼠回传在小屏无意义 |
+| 终端                        | xterm pane（`terminal-pane.vue`）                                              | **砍**。远期只读 tail                    | 手机打字进终端体验极差                         |
+| dockview 多 pane 分屏       | chat/file/preview/asset/terminal/browser 六 pane（`chat-workspace.vue:43-48`） | **砍**，改为全屏页间切换                 | 手机没有多窗格空间                             |
+| Chat 流式 + 工具调用 + 审批 | local-channel WS（swagger `:10417`）、composer-panel-approval                  | **全量保留，原生实现**                   | 核心价值                                       |
+| 会话/文件/定时任务          | 侧栏三 panel                                                                   | **保留**，files 只读浏览 + 预览          | swagger containerd 域有完整文件 CRUD           |
+| 用量                        | 图表 + 过滤器                                                                  | **保留**                                 | 查看型                                         |
+| provider 配置族             | 6 页表单                                                                       | **砍**为只读状态行                       | 手机上是"看状态"不是"全量编辑"                 |
+| onboarding 建 bot           | 5 步向导                                                                       | **砍**。手机上不允许创建 bot，提示去 Web | 创建涉及 provider 选择等重决策                 |
 
 **一句话取舍原则：手机 = agent 的遥控器与审批台，不是 agent 的产房。**
 
@@ -74,16 +74,16 @@
 
 品牌默认方案 `memoh` = 紫色系（`constants/color-schemes.ts:17-19`）：
 
-| 角色 | Light | Dark | iOS 映射 |
-|---|---|---|---|
-| background | `oklch(0.984 0.0024 72)` ≈ `#FBFAF8` 微暖 | `oklch(0.152 0 0)` | **自定义** `backgroundPrimary`（微暖是品牌特征，不用纯白 systemBackground） |
-| card/editor | `#FFFFFF` | `oklch(0.21 0 0)` | `backgroundElevated` ≈ secondarySystemBackground 角色 |
-| chrome 面 | ≈`#F9F9F9`（`style.css:56-76`） | `oklch(0.185)` | `backgroundChrome` ≈ tertiarySystemBackground 角色 |
-| foreground | `oklch(0.21 0.004 95)` | `oklch(0.86 0 0)` | 直接映射 **label / secondaryLabel** |
-| **brand 紫** | `oklch(0.55 0.22 290)` | `oklch(0.72 0.16 290)` | **全局 tintColor**，SwiftUI `.tint`，UIKit `UIView.tintColor` |
-| 用户气泡 | 浅薰衣草 `rgb(238,229,254)` / 深紫黑字；暗色**翻转为实心深紫 `rgb(83,45,141)` + 白字**（`style.css:153-173, 188-193`） | 同左 | 自定义 `chatUserBubble` / `chatUserBubbleForeground`，亮暗两套**不是简单反相** |
-| 语义色 | success/warning/info 各五件组（soft 底 + 深字 + border，`token-catalog.ts:17-64`），destructive 红 | 同左 | 映射 systemGreen/Orange/Blue/Red 的 **soft 变体**（`UIColor.systemGreen.withAlphaComponent(0.12)` 底 + 纯色字），保持"soft 底 + 深字"克制风格 |
-| 分隔线 | `rgb(240 239 237)` 1.2px / 原生接缝 6-7% 黑（`style.css:88-99`） | — | **separator**，hairline（1/scale px），无色差惊喜 |
+| 角色         | Light                                                                                                                  | Dark                   | iOS 映射                                                                                                                                      |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| background   | `oklch(0.984 0.0024 72)` ≈ `#FBFAF8` 微暖                                                                              | `oklch(0.152 0 0)`     | **自定义** `backgroundPrimary`（微暖是品牌特征，不用纯白 systemBackground）                                                                   |
+| card/editor  | `#FFFFFF`                                                                                                              | `oklch(0.21 0 0)`      | `backgroundElevated` ≈ secondarySystemBackground 角色                                                                                         |
+| chrome 面    | ≈`#F9F9F9`（`style.css:56-76`）                                                                                        | `oklch(0.185)`         | `backgroundChrome` ≈ tertiarySystemBackground 角色                                                                                            |
+| foreground   | `oklch(0.21 0.004 95)`                                                                                                 | `oklch(0.86 0 0)`      | 直接映射 **label / secondaryLabel**                                                                                                           |
+| **brand 紫** | `oklch(0.55 0.22 290)`                                                                                                 | `oklch(0.72 0.16 290)` | **全局 tintColor**，SwiftUI `.tint`，UIKit `UIView.tintColor`                                                                                 |
+| 用户气泡     | 浅薰衣草 `rgb(238,229,254)` / 深紫黑字；暗色**翻转为实心深紫 `rgb(83,45,141)` + 白字**（`style.css:153-173, 188-193`） | 同左                   | 自定义 `chatUserBubble` / `chatUserBubbleForeground`，亮暗两套**不是简单反相**                                                                |
+| 语义色       | success/warning/info 各五件组（soft 底 + 深字 + border，`token-catalog.ts:17-64`），destructive 红                     | 同左                   | 映射 systemGreen/Orange/Blue/Red 的 **soft 变体**（`UIColor.systemGreen.withAlphaComponent(0.12)` 底 + 纯色字），保持"soft 底 + 深字"克制风格 |
+| 分隔线       | `rgb(240 239 237)` 1.2px / 原生接缝 6-7% 黑（`style.css:88-99`）                                                       | —                      | **separator**，hairline（1/scale px），无色差惊喜                                                                                             |
 
 换肤方案（ocean/forest/rose/amber）是 Web 差异化功能，**iOS 不做**，只取 memoh 一套。
 
@@ -99,39 +99,39 @@ iOS：**什么都不用做**——全部颜色走 asset catalog 的 light/dark �
 Web：Inter + MiSans，UI 16px，chat 正文 16px/行高 1.48，字重按 script 光学补偿（`style.css:330-400`）。
 iOS：**SF Pro / PingFang 系统栈，全部 Dynamic Type**：
 
-| Web 用法 | iOS 文本样式 | 备注 |
-|---|---|---|
-| chat 正文 16px | `.body` | 不 pin 死，跟随系统字号 |
-| 工具卡内文 13.5px | `.footnote` | |
-| 消息 meta 12px | `.caption` | |
-| 区块标题 | `.headline` / `.title3` | |
-| 代码 13px | 13pt `UIFont.monospacedSystemFont`，**代码块可不跟随 Dynamic Type**（等宽排版稳定性优先） | |
-| 按钮 14px wght 450 | `.body` + `.medium`（SF 的 medium ≈ 光学 450） | 不要搬 420/340 那些数字 |
+| Web 用法           | iOS 文本样式                                                                              | 备注                    |
+| ------------------ | ----------------------------------------------------------------------------------------- | ----------------------- |
+| chat 正文 16px     | `.body`                                                                                   | 不 pin 死，跟随系统字号 |
+| 工具卡内文 13.5px  | `.footnote`                                                                               |                         |
+| 消息 meta 12px     | `.caption`                                                                                |                         |
+| 区块标题           | `.headline` / `.title3`                                                                   |                         |
+| 代码 13px          | 13pt `UIFont.monospacedSystemFont`，**代码块可不跟随 Dynamic Type**（等宽排版稳定性优先） |                         |
+| 按钮 14px wght 450 | `.body` + `.medium`（SF 的 medium ≈ 光学 450）                                            | 不要搬 420/340 那些数字 |
 
 ### 2.4 圆角 / 间距 / 阴影 / 动效
 
-| 项 | Web 值 | iOS 决策 |
-|---|---|---|
-| 卡片圆角 | `--radius-menu-shell`（小圆角 + border） | **10pt 连续圆角**（列表卡）/ **16pt**（气泡、composer，对应 Web `rounded-2xl`）/ inset grouped list 用系统默认 |
-| 气泡 | `rounded-2xl` 16px（`message-item.vue:756`） | 16pt，带附件一侧角不变尖（Web 的尖角是桌面语言，iOS 气泡统一圆角） |
-| 间距 | Tailwind 4px 基，语义 rung（`SectionSpacing.vue:33-46`） | 4pt 基网格：4/8/12/16/20/24/32，与 Web rung 一一对应 |
-| 阴影 | **体系性排斥**，只留真浮层（`style.css:196-199`，全 app 仅 7 处） | **天然一致**：iOS 同样只在 floating 层（alert、popover、悬浮 pill）用系统投影，内容一律 hairline 分隔 |
-| 动画曲线 | easeOutExpo `cubic-bezier(0.16,1,0.3,1)` 全家统一（`style.css:237-243`） | SwiftUI `.interpolatingSpring` 或 `timingCurve(0.16,1,0.3,1)` 自定义；按压 scale 0.97/150ms 直接继承 |
-| 流式 shimmer | `tool-shimmer-text` 1.6s 扫光（`style.css:565-582`） | 原生复刻：渐变 mask 扫过 muted 文字，**尊重 Reduce Motion**（Web 也有 `prefers-reduced-motion` 降级，`style.css:608-622`） |
+| 项           | Web 值                                                                   | iOS 决策                                                                                                                   |
+| ------------ | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| 卡片圆角     | `--radius-menu-shell`（小圆角 + border）                                 | **10pt 连续圆角**（列表卡）/ **16pt**（气泡、composer，对应 Web `rounded-2xl`）/ inset grouped list 用系统默认             |
+| 气泡         | `rounded-2xl` 16px（`message-item.vue:756`）                             | 16pt，带附件一侧角不变尖（Web 的尖角是桌面语言，iOS 气泡统一圆角）                                                         |
+| 间距         | Tailwind 4px 基，语义 rung（`SectionSpacing.vue:33-46`）                 | 4pt 基网格：4/8/12/16/20/24/32，与 Web rung 一一对应                                                                       |
+| 阴影         | **体系性排斥**，只留真浮层（`style.css:196-199`，全 app 仅 7 处）        | **天然一致**：iOS 同样只在 floating 层（alert、popover、悬浮 pill）用系统投影，内容一律 hairline 分隔                      |
+| 动画曲线     | easeOutExpo `cubic-bezier(0.16,1,0.3,1)` 全家统一（`style.css:237-243`） | SwiftUI `.interpolatingSpring` 或 `timingCurve(0.16,1,0.3,1)` 自定义；按压 scale 0.97/150ms 直接继承                       |
+| 流式 shimmer | `tool-shimmer-text` 1.6s 扫光（`style.css:565-582`）                     | 原生复刻：渐变 mask 扫过 muted 文字，**尊重 Reduce Motion**（Web 也有 `prefers-reduced-motion` 降级，`style.css:608-622`） |
 
 ### 2.5 Web 惯用但 iOS 上"不原生"的做法 → 替代方案
 
-| Web 做法 | 为什么不原生 | iOS 替代 |
-|---|---|---|
-| 居中 Dialog（无 X，靠 Cancel/Esc， `SectionOverlays.vue:36-60`） | iOS 居中弹窗仅用于 alert（破坏性确认） | **sheet（.sheet / pageSheet）**，iPhone 上从底部升起 |
-| hover 态语言（`--ui-hover` 浅灰 overlay、tooltip、HoverCard） | 触屏无 hover | **按压态**（高亮 + 0.97 缩放），tooltip 信息改为长按 context menu 或页面内常驻说明 |
-| 5px 自绘滚动条（`style.css:770-800`） | iOS 滚动条是系统瞬态指示器 | 不做任何自绘，用系统 |
-| 小圆角卡片 + 边框做设置列表 | iOS 设置列表的母语是 inset grouped | **SwiftUI Form / inset grouped List**，separator 对齐 text |
-| ghost hover 按钮 | 同上 | iOS 的 ghost = **`.borderless` / tint 文字按钮**，按压显灰底 |
-| 链接点状下划线 + hover 变紫（`style.css:640-760`） | 触屏不需要悬停反馈 | 直接 brand 紫着色（SF 风格），不加下划线 |
-| 搜索框在侧栏顶部 | — | `.searchable` + 导航栏搜索框（下滑出现） |
-| 右键 ContextMenu | — | **长按 context menu**（原生 UIContextMenu），顺带预览 |
-| 键盘快捷键页 | — | iPad 上改做 keyboard commands（⌘），不做页面 |
+| Web 做法                                                         | 为什么不原生                           | iOS 替代                                                                           |
+| ---------------------------------------------------------------- | -------------------------------------- | ---------------------------------------------------------------------------------- |
+| 居中 Dialog（无 X，靠 Cancel/Esc， `SectionOverlays.vue:36-60`） | iOS 居中弹窗仅用于 alert（破坏性确认） | **sheet（.sheet / pageSheet）**，iPhone 上从底部升起                               |
+| hover 态语言（`--ui-hover` 浅灰 overlay、tooltip、HoverCard）    | 触屏无 hover                           | **按压态**（高亮 + 0.97 缩放），tooltip 信息改为长按 context menu 或页面内常驻说明 |
+| 5px 自绘滚动条（`style.css:770-800`）                            | iOS 滚动条是系统瞬态指示器             | 不做任何自绘，用系统                                                               |
+| 小圆角卡片 + 边框做设置列表                                      | iOS 设置列表的母语是 inset grouped     | **SwiftUI Form / inset grouped List**，separator 对齐 text                         |
+| ghost hover 按钮                                                 | 同上                                   | iOS 的 ghost = **`.borderless` / tint 文字按钮**，按压显灰底                       |
+| 链接点状下划线 + hover 变紫（`style.css:640-760`）               | 触屏不需要悬停反馈                     | 直接 brand 紫着色（SF 风格），不加下划线                                           |
+| 搜索框在侧栏顶部                                                 | —                                      | `.searchable` + 导航栏搜索框（下滑出现）                                           |
+| 右键 ContextMenu                                                 | —                                      | **长按 context menu**（原生 UIContextMenu），顺带预览                              |
+| 键盘快捷键页                                                     | —                                      | iPad 上改做 keyboard commands（⌘），不做页面                                       |
 
 ---
 
@@ -176,6 +176,7 @@ iOS：**SF Pro / PingFang 系统栈，全部 Dynamic Type**：
 ```
 
 **present vs push 规则**：
+
 - **sheet（present）**：审批请求、新建/编辑类短任务（定时任务）、媒体预览、BotSwitcher（下拉菜单式 sheet）、登录/onboarding。特征：完成即消失、与当前上下文平行。
 - **push**：一切"往里钻"的浏览行为——会话→Chat→diff、文件目录→文件、列表→详情。
 - **alert（UIAlertController）**：仅破坏性确认（删除会话），对应 Web 的 ConfirmDeleteDialog。
@@ -273,19 +274,19 @@ iOS：**SF Pro / PingFang 系统栈，全部 Dynamic Type**：
 
 ### 4.2 消息流内容块
 
-| 内容块 | 呈现 | 控件/字体/圆角 |
-|---|---|---|
-| **用户消息** | 右对齐气泡，浅薰衣草底深紫黑字；暗色实心深紫白字（继承 Web 的翻转策略，`style.css:188-193`）。**气泡只靠底色区分，排版与助手完全一致** | 16pt 圆角连续曲线；padding 12×16；`.body`；最大宽 78% 屏宽 |
-| **助手文本** | **全宽无气泡**，markdown 直排 | `.body`，行高约 1.5；块间距 12pt；左右边距 16 |
-| **思考过程** | 单行折叠 header："Thought for 12s"，`--cop-title` 级弱灰（比 secondaryLabel 再弱）；流式中 shimmer；点按展开 muted 正文 | header `.footnote` + chevron.right 旋转展开；展开正文 `.footnote` secondaryLabel；整行高 28pt |
-| **工具调用（单个）** | 裸行：动词 + 目标 + `+N/-N` diff（success/destructive 色）+ 审批徽标（warning），无卡片框 | `.footnote`；行内 icon 12pt；行高 24pt |
+| 内容块               | 呈现                                                                                                                                                                  | 控件/字体/圆角                                                                                                    |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| **用户消息**         | 右对齐气泡，浅薰衣草底深紫黑字；暗色实心深紫白字（继承 Web 的翻转策略，`style.css:188-193`）。**气泡只靠底色区分，排版与助手完全一致**                                | 16pt 圆角连续曲线；padding 12×16；`.body`；最大宽 78% 屏宽                                                        |
+| **助手文本**         | **全宽无气泡**，markdown 直排                                                                                                                                         | `.body`，行高约 1.5；块间距 12pt；左右边距 16                                                                     |
+| **思考过程**         | 单行折叠 header："Thought for 12s"，`--cop-title` 级弱灰（比 secondaryLabel 再弱）；流式中 shimmer；点按展开 muted 正文                                               | header `.footnote` + chevron.right 旋转展开；展开正文 `.footnote` secondaryLabel；整行高 28pt                     |
+| **工具调用（单个）** | 裸行：动词 + 目标 + `+N/-N` diff（success/destructive 色）+ 审批徽标（warning），无卡片框                                                                             | `.footnote`；行内 icon 12pt；行高 24pt                                                                            |
 | **工具调用（多个）** | **折叠 process 卡**：header 双色调（muted 动词 shimmer "Exploring" → 定稿 "Explored" + 深色计数 N），展开为紧凑胶囊列表。**卡内绝不出第二根滚动条**（Web 原则，继承） | 卡片：10pt 圆角 + hairline 边 + backgroundChrome 底；header `.footnote` wght medium；展开项 `.caption` 等宽目标名 |
-| **文件改动卡** | process 卡的一种：文件名（等宽）+ `+N/-N` + 点击 push 全屏 diff（added=systemGreen / removed=systemRed 软底行） | 全屏 diff 用等宽 13pt，行级背景色，不支持编辑 |
-| **审批请求** | 消息流内只放状态摘要（"已批准/已拒绝/等待中"徽标）；**交互主体在 composer 上方的 panel**（见 4.4）与 push 通知 | 徽标 = soft 底 + 深字 pill，`.caption` |
-| **图片** | 圆角缩略图 inline，点击全屏 lightbox（捏合缩放、下拉关闭） | 10pt 圆角；最大高 240pt；全屏用 QLPreviewController 或自研 zoom |
-| **代码块** | hairline 框 + 底（亮=backgroundElevated / 暗=card 灰），copy 按钮常驻右上（ghost，不需要 hover 触发） | 10pt 圆角；等宽 13pt；横向滚动（不换行）；copy=doc.on.doc 图标 |
-| **错误/中断态** | 消息流末尾 inline：destructive soft 底横条 + "已中断/重试"操作；对应 Web 的 composer-panel-error | `.footnote`；重试按钮 tint 文字样式 |
-| **流式光标** | 助手正文末尾一个 2pt 宽竖条呼吸（brand 紫 40%），**不要用 "▋" 字符闪烁** | 仅最后一条消息显示；消息完成即移除 |
+| **文件改动卡**       | process 卡的一种：文件名（等宽）+ `+N/-N` + 点击 push 全屏 diff（added=systemGreen / removed=systemRed 软底行）                                                       | 全屏 diff 用等宽 13pt，行级背景色，不支持编辑                                                                     |
+| **审批请求**         | 消息流内只放状态摘要（"已批准/已拒绝/等待中"徽标）；**交互主体在 composer 上方的 panel**（见 4.4）与 push 通知                                                        | 徽标 = soft 底 + 深字 pill，`.caption`                                                                            |
+| **图片**             | 圆角缩略图 inline，点击全屏 lightbox（捏合缩放、下拉关闭）                                                                                                            | 10pt 圆角；最大高 240pt；全屏用 QLPreviewController 或自研 zoom                                                   |
+| **代码块**           | hairline 框 + 底（亮=backgroundElevated / 暗=card 灰），copy 按钮常驻右上（ghost，不需要 hover 触发）                                                                 | 10pt 圆角；等宽 13pt；横向滚动（不换行）；copy=doc.on.doc 图标                                                    |
+| **错误/中断态**      | 消息流末尾 inline：destructive soft 底横条 + "已中断/重试"操作；对应 Web 的 composer-panel-error                                                                      | `.footnote`；重试按钮 tint 文字样式                                                                               |
+| **流式光标**         | 助手正文末尾一个 2pt 宽竖条呼吸（brand 紫 40%），**不要用 "▋" 字符闪烁**                                                                                              | 仅最后一条消息显示；消息完成即移除                                                                                |
 
 ### 4.3 流式输出的视觉稳定（不闪、不跳）
 
@@ -337,14 +338,14 @@ iOS：**SF Pro / PingFang 系统栈，全部 Dynamic Type**：
 
 ### 4.7 空态与加载态
 
-| 场景 | 呈现 |
-|---|---|
+| 场景             | 呈现                                                                                                                                 |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | 新会话（无消息） | 居中：bot 头像 48pt + Display 字 "有什么可以帮你？" + 3 个建议 prompt 胶囊（quick-actions，swagger 有对应 tag）。点击即填入 composer |
-| 会话列表空 | 插画免了——secondaryLabel 文案 "还没有会话，发一条消息开始" + 主按钮 |
-| 消息加载中 | 骨架屏 3 条（灰胶囊呼吸，不调网络期间不闪） |
-| 流式等待首 token | 助手位出现 process 卡 header shimmer "Thinking…"（不显示空气泡） |
-| agent 离线 | 导航栏标题下加状态行（warning 色 ● 离线），composer 禁用 + 说明条 |
-| WS 断连 | composer 上方 inline 条 "连接中断，重试中…"（不弹 alert），指数退避自动重连 |
+| 会话列表空       | 插画免了——secondaryLabel 文案 "还没有会话，发一条消息开始" + 主按钮                                                                  |
+| 消息加载中       | 骨架屏 3 条（灰胶囊呼吸，不调网络期间不闪）                                                                                          |
+| 流式等待首 token | 助手位出现 process 卡 header shimmer "Thinking…"（不显示空气泡）                                                                     |
+| agent 离线       | 导航栏标题下加状态行（warning 色 ● 离线），composer 禁用 + 说明条                                                                    |
+| WS 断连          | composer 上方 inline 条 "连接中断，重试中…"（不弹 alert），指数退避自动重连                                                          |
 
 ---
 
@@ -372,26 +373,26 @@ iOS：**SF Pro / PingFang 系统栈，全部 Dynamic Type**：
 
 ### 第一周能做完的 MVP 屏幕
 
-| 屏幕 | 范围 |
-|---|---|
-| 登录 | 服务器地址 + token 登录（对齐 Web `/login` 的最小路径） |
-| 会话列表（方案 A） | 单 bot 即可；进行中状态轮询；无跨 bot 审批聚合 |
-| Chat | 用户/助手文本、工具调用折叠卡（只读展示）、代码块、错误态、**流式渲染 + 停止** |
-| Composer | 文本 + 发送/停止；模型选择只读显示当前值 |
-| 审批 | composer panel 内 允许/拒绝（无"总是允许"、无反馈输入） |
-| 设置 | 账号、外观（跟随系统/亮/暗）、关于 |
-| WS 通道 | local-channel 双向流式 + 断线重连 |
+| 屏幕               | 范围                                                                           |
+| ------------------ | ------------------------------------------------------------------------------ |
+| 登录               | 服务器地址 + token 登录（对齐 Web `/login` 的最小路径）                        |
+| 会话列表（方案 A） | 单 bot 即可；进行中状态轮询；无跨 bot 审批聚合                                 |
+| Chat               | 用户/助手文本、工具调用折叠卡（只读展示）、代码块、错误态、**流式渲染 + 停止** |
+| Composer           | 文本 + 发送/停止；模型选择只读显示当前值                                       |
+| 审批               | composer panel 内 允许/拒绝（无"总是允许"、无反馈输入）                        |
+| 设置               | 账号、外观（跟随系统/亮/暗）、关于                                             |
+| WS 通道            | local-channel 双向流式 + 断线重连                                              |
 
 MVP 明确不做：附件、定时任务 tab、用量、文件浏览、push 通知、多 bot 切换 UI（写死第一个 bot）、diff 全屏。
 
 ### 之后再说（按优先级排）
 
-| 批次 | 内容 |
-|---|---|
-| V1.1 | push 通知 + 审批快捷 action；BotSwitcher；附件（图片）；diff 全屏；定时任务只读 tab |
-| V1.2 | 文件浏览器（只读 + 预览）；用量页；多审批排队；会话搜索；context menu 完整操作 |
-| V1.3 | 能力状态只读页；定时任务编辑；思考块、后台任务列表、quick actions 建议 |
-| V2 | iPad 适配（sidebar 双栏）；键盘快捷键；小组件（审批计数）；Share Extension（分享到会话） |
+| 批次           | 内容                                                                                           |
+| -------------- | ---------------------------------------------------------------------------------------------- |
+| V1.1           | push 通知 + 审批快捷 action；BotSwitcher；附件（图片）；diff 全屏；定时任务只读 tab            |
+| V1.2           | 文件浏览器（只读 + 预览）；用量页；多审批排队；会话搜索；context menu 完整操作                 |
+| V1.3           | 能力状态只读页；定时任务编辑；思考块、后台任务列表、quick actions 建议                         |
+| V2             | iPad 适配（sidebar 双栏）；键盘快捷键；小组件（审批计数）；Share Extension（分享到会话）       |
 | 不做（回 Web） | 容器桌面串流、终端、provider 配置表单、建 bot 向导、people 管理、memory 图谱、supermarket 安装 |
 
 ---

@@ -126,7 +126,8 @@ export function approvalTone(optionId: string, kind?: string): ApprovalChoice['t
 /** 没有 label 时的本地化兜底文案 key。 */
 export function fallbackOptionKey(optionId: string, kind?: string): string {
   const probe = `${optionId} ${kind ?? ''}`.toLowerCase();
-  if (probe.includes('reject_always') || probe.includes('deny_always')) return 'approval.rejectAlways';
+  if (probe.includes('reject_always') || probe.includes('deny_always'))
+    return 'approval.rejectAlways';
   if (probe.includes('reject') || probe.includes('deny')) return 'approval.rejectOnce';
   if (probe.includes('always')) return 'approval.allowAlways';
   return 'approval.allowOnce';
@@ -134,15 +135,18 @@ export function fallbackOptionKey(optionId: string, kind?: string): string {
 
 const IMAGE_MIME_PREFIX = 'image/';
 
-export function attachmentRef(attachment: {
-  id?: string;
-  type?: string;
-  name?: string;
-  mime?: string;
-  url?: string;
-  path?: string;
-  size?: number;
-}, index: number): AttachmentRef {
+export function attachmentRef(
+  attachment: {
+    id?: string;
+    type?: string;
+    name?: string;
+    mime?: string;
+    url?: string;
+    path?: string;
+    size?: number;
+  },
+  index: number,
+): AttachmentRef {
   const mime = attachment.mime;
   const name = attachment.name ?? attachment.path?.split('/').pop() ?? `file-${index}`;
   return {

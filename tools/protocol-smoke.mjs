@@ -73,7 +73,10 @@ class Checkpoint {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const env = loadEnv();
-  const baseUrl = (args.baseUrl ?? env.MEMOH_DEV_BASE_URL ?? 'http://127.0.0.1:18080').replace(/\/+$/, '');
+  const baseUrl = (args.baseUrl ?? env.MEMOH_DEV_BASE_URL ?? 'http://127.0.0.1:18080').replace(
+    /\/+$/,
+    '',
+  );
   const password = env.MEMOH_ADMIN_PASSWORD;
   if (!password) {
     fail('dev.env 里没有 MEMOH_ADMIN_PASSWORD');
@@ -139,7 +142,11 @@ async function main() {
   cp.expect('next_cursor' in (sessions.body ?? {}), '响应含 next_cursor（空串=到底）');
 
   const created = await api('POST', `/bots/${bot.id}/sessions`, { title: 'iOS smoke' });
-  cp.expect(created.status === 200 || created.status === 201, 'POST 建会话成功', `HTTP ${created.status}`);
+  cp.expect(
+    created.status === 200 || created.status === 201,
+    'POST 建会话成功',
+    `HTTP ${created.status}`,
+  );
   const sessionId = created.body?.id ?? created.body?.session_id ?? created.body?.data?.id;
   if (typeof sessionId !== 'string') {
     fail(`建会话没拿到 session id：${JSON.stringify(created.body)?.slice(0, 200)}`);
@@ -252,11 +259,17 @@ async function main() {
   if (acceptedArrived) {
     cp.expect(typeof runAccepted.run_id === 'string', 'run_accepted 带 run_id');
     cp.expect(typeof runAccepted.turn_id === 'string', 'run_accepted 带 turn_id');
-    cp.expect(acceptedArrived && runAccepted.invocation_id === invocationId, 'invocation_id 回显一致');
+    cp.expect(
+      acceptedArrived && runAccepted.invocation_id === invocationId,
+      'invocation_id 回显一致',
+    );
   }
 
   // 等正文。这是整个测试的重点：正文只会出现在 runtime_delta 里。
-  const gotBody = await waitFor(() => textFromAppends.length > 0 || textFromUpserts.length > 0, 90_000);
+  const gotBody = await waitFor(
+    () => textFromAppends.length > 0 || textFromUpserts.length > 0,
+    90_000,
+  );
   cp.expect(gotBody, '通过 runtime_delta 收到了正文');
   cp.expect(deltaCount > 0, 'runtime_delta 帧数 > 0', String(deltaCount));
   if (textFromAppends.length > 0) {
@@ -306,13 +319,18 @@ async function main() {
     }),
   );
   const duplicateArrived = await waitFor(
-    () => frames.slice(beforeFrames).includes('run_accepted') || frames.slice(beforeFrames).includes('run_rejected'),
+    () =>
+      frames.slice(beforeFrames).includes('run_accepted') ||
+      frames.slice(beforeFrames).includes('run_rejected'),
     30_000,
   );
   if (duplicateArrived) {
     // 重发同一个 invocation_id 不应该开启新一轮。
     const accepted = frames.slice(beforeFrames).includes('run_accepted');
-    cp.ok('重发同一 invocation_id 得到响应', accepted ? 'run_accepted（可能带 duplicate:true）' : 'run_rejected');
+    cp.ok(
+      '重发同一 invocation_id 得到响应',
+      accepted ? 'run_accepted（可能带 duplicate:true）' : 'run_rejected',
+    );
   } else {
     cp.bad('重发同一 invocation_id 没有任何响应');
   }

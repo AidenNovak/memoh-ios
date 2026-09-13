@@ -24,7 +24,7 @@ export function BotSwitcher() {
     if (botList.length === 0) return;
 
     if (Platform.OS === 'ios') {
-      const labels = botList.map((bot) => bot.display_name !== '' ? bot.display_name : bot.name);
+      const labels = botList.map((bot) => (bot.display_name !== '' ? bot.display_name : bot.name));
       ActionSheetIOS.showActionSheetWithOptions(
         {
           title: t('home.bot.switch'),
@@ -41,14 +41,18 @@ export function BotSwitcher() {
 
     // 非 iOS 平台理论上不会跑到（本项目只做 iOS），留一个不崩的退路。
     setBusy(true);
-    const next = botList[(botList.findIndex((bot) => bot.id === currentBot?.id) + 1) % botList.length];
+    const next =
+      botList[(botList.findIndex((bot) => bot.id === currentBot?.id) + 1) % botList.length];
     if (next !== undefined) selectBot(next.id);
     setBusy(false);
   }, [currentBot?.id, selectBot, state.bots, t]);
 
-  const title = currentBot === null
-    ? t('home.empty.title')
-    : (currentBot.display_name !== '' ? currentBot.display_name : currentBot.name);
+  const title =
+    currentBot === null
+      ? t('home.empty.title')
+      : currentBot.display_name !== ''
+        ? currentBot.display_name
+        : currentBot.name;
 
   return (
     <Pressable
@@ -75,7 +79,8 @@ export function BotSwitcher() {
             width: 8,
             height: 8,
             borderRadius: 4,
-            backgroundColor: currentBot?.is_active === true ? palette.success : palette.tertiaryLabel,
+            backgroundColor:
+              currentBot?.is_active === true ? palette.success : palette.tertiaryLabel,
           }}
         />
         <Text style={[typography.callout, { color: palette.label }]} numberOfLines={1}>

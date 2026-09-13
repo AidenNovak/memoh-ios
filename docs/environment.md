@@ -36,12 +36,12 @@
 
 **隔离措施**（这台机器同时跑着生产「没猫饼」）：
 
-| 手段 | 说明 |
-|---|---|
-| 端口只绑 127.0.0.1 | `docker-compose.override.yml` 里覆盖了 `ports`，公网不可达 |
-| 资源上限 | server 3 CPU / 3 GiB，postgres 1 GiB，其余更小 |
-| 独立 compose project | `memoh-dev`，与 `meimaobing-alpha` 的容器/网络/卷完全分开 |
-| 独立目录 | `/opt/memoh-dev`，不碰 `/opt/meimaobing-alpha` |
+| 手段                 | 说明                                                       |
+| -------------------- | ---------------------------------------------------------- |
+| 端口只绑 127.0.0.1   | `docker-compose.override.yml` 里覆盖了 `ports`，公网不可达 |
+| 资源上限             | server 3 CPU / 3 GiB，postgres 1 GiB，其余更小             |
+| 独立 compose project | `memoh-dev`，与 `meimaobing-alpha` 的容器/网络/卷完全分开  |
+| 独立目录             | `/opt/memoh-dev`，不碰 `/opt/meimaobing-alpha`             |
 
 ## 一次性准备
 
@@ -77,6 +77,7 @@ ssh vultr-sg "bash /opt/memoh-dev/ops/seed-dev-bot.sh"
 ```
 
 脚本是幂等的。注意两个容易踩的点，脚本里已经处理：
+
 - 导入的模型默认 **disabled**，要显式启用，否则 run 在解析阶段就失败；
 - 对话模型是写在 **bot settings** 里的（`PUT /bots/{id}/settings`），不是 bot 记录上。
 
@@ -96,12 +97,12 @@ App 的登录页默认填的就是 `http://127.0.0.1:18080`。
 
 ## 凭据放在哪
 
-| 位置 | 内容 | 权限 |
-|---|---|---|
-| `vultr-sg:/opt/memoh-dev/secrets/memoh-dev.env` | 数据库密码、JWT secret、admin 密码 | 600 |
-| `vultr-sg:/opt/memoh-dev/secrets/provider.env` | 模型提供商的 API key | 600 |
-| `vultr-sg:/opt/memoh-dev/config.toml` | 服务端配置（含上面几个 secret） | 600 |
-| 本机 `~/.config/memoh-ios/dev.env` | 上面第一份的副本，供本机脚本读 | 600 |
+| 位置                                            | 内容                               | 权限 |
+| ----------------------------------------------- | ---------------------------------- | ---- |
+| `vultr-sg:/opt/memoh-dev/secrets/memoh-dev.env` | 数据库密码、JWT secret、admin 密码 | 600  |
+| `vultr-sg:/opt/memoh-dev/secrets/provider.env`  | 模型提供商的 API key               | 600  |
+| `vultr-sg:/opt/memoh-dev/config.toml`           | 服务端配置（含上面几个 secret）    | 600  |
+| 本机 `~/.config/memoh-ios/dev.env`              | 上面第一份的副本，供本机脚本读     | 600  |
 
 **这些文件都不进 Git。** 仓库里的脚本只负责读写它们，从不打印内容。
 
@@ -115,16 +116,44 @@ ssh vultr-sg "/opt/memoh-dev/ops/memoh-dev.sh pull"        # 拉新镜像并重�
 ssh vultr-sg "/opt/memoh-dev/ops/memoh-dev.sh psql"        # 直连数据库
 ```
 
-## 协议冒烟测试
+## 协议冒烟测试与集成测试
 
-改协议相关代码之前/之后跑一遍。它按 iOS 客户端将要走的顺序对活服务端验证一遍，
-包括那几条最容易理解错的：发消息的连接收不到正文、必须先订阅、增量是 append。
+这是两件不同的事，别混：
+
+| 脚本                         | 验证什么                                                                              | 用什么代码       |
+| ---------------------------- | ------------------------------------------------------------------------------------- | ---------------- |
+| `tools/protocol-smoke.mjs`   | **我们对协议的理解对不对**——按 iOS 客户端将要走的顺序对活服务端跑一遍                 | 脚本里另写的解析 |
+| `tools/live-integration.mjs` | **我们写的那套代码对不对**——直接 import `src/api/*` 与 `src/features/chat/reducer.ts` | App 的真实源码   |
+
+两者都需要隧道开着。改协议层之前/之后都该跑。
 
 ```bash
 node tools/protocol-smoke.mjs
 node tools/protocol-smoke.mjs --keep-session   # 保留测试会话便于排查
 node tools/protocol-smoke.mjs --base-url http://其他地址
+
+node tools/live-integration.mjs
+node tools/live-integration.mjs --keep-session
 ```
+
+`protocol-smoke` 覆盖那几条最容易理解错的结论：发消息的连接收不到正文、必须先订阅、
+增量是 append 不是 upsert、`invocation_id` 幂等。
+
+## 模拟器里的端到端验收
+
+`chat-roundtrip` 这条 case 在模拟器里真的跑一轮对话（登录 → 会话 → 发送 → 看到回复）。
+它归在 `live` 批次里，**默认不跑**——依赖外部服务端的验收不能当基线：
+
+```bash
+pnpm dev:env
+pnpm verify:simulator --name 'chat roundtrip' -- zsh -euc '
+  pnpm verify:ui --app "$(pnpm --silent verify:build | tail -1)" --case chat-roundtrip
+'
+```
+
+它靠"启动种子"驱动（`simctl` 没有点击能力）：脚本往 App 沙箱放一个 JSON，开发构建
+读它并自动执行 `apps/mobile/src/features/verify/` 里定义的动作。被验证的是真实路径，
+省掉的只有"手指点屏幕"。种子文件里有密码，拷进模拟器沙箱、用完即删，不进仓库。
 
 ## 生产不要照抄的地方
 

@@ -23,7 +23,9 @@ export function ConnectionBadge() {
     return (
       <View style={styles.row}>
         <View style={[styles.dot, { backgroundColor: palette.tertiaryLabel }]} />
-        <Text style={[typography.caption, { color: palette.tertiaryLabel }]}>{t('chat.disconnected')}</Text>
+        <Text style={[typography.caption, { color: palette.tertiaryLabel }]}>
+          {t('chat.disconnected')}
+        </Text>
       </View>
     );
   }

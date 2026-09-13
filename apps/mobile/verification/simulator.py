@@ -195,6 +195,10 @@ class SimulatorPool:
                 device = {'udid': udid, 'name': name, 'state': 'Shutdown'}
             marker = self.marker(device['udid'])
             marker.touch()
+        except BaseException:
+            if device_lock is not None:
+                device_lock.close()
+            raise
         finally:
             pool_lock.close()
 

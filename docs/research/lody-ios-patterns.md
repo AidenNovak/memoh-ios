@@ -6,6 +6,7 @@
 - **未验证**：本机是只读副本且**未安装 `node_modules`**，我读的是源码与脚本，没有实际跑过它的构建/验收命令。凡是从代码推断而非文档明说的点都标注"未验证"。
 
 > ## ⚠️ 先决条件：许可证
+>
 > `lody-ios` 是 **AGPL-3.0-only**（根 `package.json`、`LICENSE`）。**不要把这个仓库的源码文本拷进 Memoh**——AGPL 对"通过网络提供服务"的衍生作品有源码开放义务，会污染 Memoh 的许可证。
 > 本文只提取**结构、约定与脚本范式**（目录分层、契约设计、验收流程、CI 拓扑）。照抄目录与契约是安全的；整段复制 `.swift` / `.ts` / `verification/*.py` 的代码文本不安全，请自己重写。下文片段只作"形状"参考。
 
@@ -88,30 +89,30 @@ apps/mobile/
 
 配置文件职责：
 
-| 文件 | 承担什么 | 关键点 |
-|---|---|---|
-| `app.config.ts` | 原生工程**唯一真源**：name/slug/version/platforms/scheme/orientation/icon、`ios.deploymentTarget`、bundleIdentifier、`appleTeamId`、`supportsTablet`、`infoPlist`、`plugins[]`、`experiments`、`runtimeVersion`、`updates` | `platforms: ['ios']`；`experiments: { typedRoutes: true, reactCompiler: true }`；`runtimeVersion: { policy: 'fingerprint' }`；OTA `updates.url` + `requestHeaders['expo-channel-name']` |
-| `pnpm-workspace.yaml` | `packages: [apps/*, packages/*]`、`overrides`（顶掉 `@expo/dom-webview`）、`allowBuilds.esbuild`、`nodeLinker: hoisted`、`patchedDependencies` | `hoisted` 让 Swift/JS 工具链只解析到一份依赖 |
-| `tsconfig.json`（根 + mobile） | 根只 `extends expo/tsconfig.base`；mobile 里 `strict: true` + path alias | `@lody-ios/kit → modules/lody-kit/src` 是"本地模块不以 node_modules 形式存在"的关键（未验证：依赖 Expo CLI 对 tsconfig `paths` 的 Metro 解析，SDK 49+ 默认支持；本机未装依赖没实测） |
-| `metro.config.js` | `getDefaultConfig(__dirname)`；**只加一行** `config.cacheVersion += ':' + __dirname` | 防多 worktree 共享 Metro/DOM 缓存（Expo DOM transform 会内联绝对路径） |
-| `index.js` | `expo-asset` → `./src/lib/i18n/boot.ts` → `expo-router/entry` | **i18n 必须在 router 之前**，否则首帧文案/原生 prop 读到默认 locale |
-| `babel` | **仓库里没有 `babel.config.js`**；`babel-preset-expo`/`@babel/core` 只在根 devDependencies | 未验证：SDK 57 由 Metro 提供默认 transform，需要自定义时才补 config |
-| `plugins/*` | `withLocales`（→ xcstrings）、`withPushNotifications`（NSE + App Group + SDK pin）、`withMarkdownView`（SPM）、`withLodyIcons` | 生成的 `ios/` 是**被 gitignore 的产物**，所有改动必须落在 app config / plugin / LodyKit |
+| 文件                           | 承担什么                                                                                                                                                                                                                   | 关键点                                                                                                                                                                                  |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app.config.ts`                | 原生工程**唯一真源**：name/slug/version/platforms/scheme/orientation/icon、`ios.deploymentTarget`、bundleIdentifier、`appleTeamId`、`supportsTablet`、`infoPlist`、`plugins[]`、`experiments`、`runtimeVersion`、`updates` | `platforms: ['ios']`；`experiments: { typedRoutes: true, reactCompiler: true }`；`runtimeVersion: { policy: 'fingerprint' }`；OTA `updates.url` + `requestHeaders['expo-channel-name']` |
+| `pnpm-workspace.yaml`          | `packages: [apps/*, packages/*]`、`overrides`（顶掉 `@expo/dom-webview`）、`allowBuilds.esbuild`、`nodeLinker: hoisted`、`patchedDependencies`                                                                             | `hoisted` 让 Swift/JS 工具链只解析到一份依赖                                                                                                                                            |
+| `tsconfig.json`（根 + mobile） | 根只 `extends expo/tsconfig.base`；mobile 里 `strict: true` + path alias                                                                                                                                                   | `@lody-ios/kit → modules/lody-kit/src` 是"本地模块不以 node_modules 形式存在"的关键（未验证：依赖 Expo CLI 对 tsconfig `paths` 的 Metro 解析，SDK 49+ 默认支持；本机未装依赖没实测）    |
+| `metro.config.js`              | `getDefaultConfig(__dirname)`；**只加一行** `config.cacheVersion += ':' + __dirname`                                                                                                                                       | 防多 worktree 共享 Metro/DOM 缓存（Expo DOM transform 会内联绝对路径）                                                                                                                  |
+| `index.js`                     | `expo-asset` → `./src/lib/i18n/boot.ts` → `expo-router/entry`                                                                                                                                                              | **i18n 必须在 router 之前**，否则首帧文案/原生 prop 读到默认 locale                                                                                                                     |
+| `babel`                        | **仓库里没有 `babel.config.js`**；`babel-preset-expo`/`@babel/core` 只在根 devDependencies                                                                                                                                 | 未验证：SDK 57 由 Metro 提供默认 transform，需要自定义时才补 config                                                                                                                     |
+| `plugins/*`                    | `withLocales`（→ xcstrings）、`withPushNotifications`（NSE + App Group + SDK pin）、`withMarkdownView`（SPM）、`withLodyIcons`                                                                                             | 生成的 `ios/` 是**被 gitignore 的产物**，所有改动必须落在 app config / plugin / LodyKit                                                                                                 |
 
 关键脚本（根 `package.json`）：
 
-| 命令 | 实际执行 | 作用 |
-|---|---|---|
-| `pnpm start` / `pnpm ios` | 转发到 `@lody-ios/mobile` | `start = expo start --dev-client`；`ios = prebuild && pods && expo run:ios --no-install` |
-| `pnpm prebuild` | `native:assets && expo prebuild --platform ios --no-install` | 先生成原生资源（离屏 HTML、许可证、图标 PNG），再生成 `ios/` |
-| `pnpm bundle` | `native:assets && EXPO_NO_BUNDLE_SPLITTING=1 expo export --platform ios --output-dir .expo/export-check` | **不发版**的打包冒烟：能在 CI ubuntu 上验证 bundle 可产出 |
-| `pnpm check` | `typecheck && i18n:check && licenses:check && format:check` | typecheck = `tsc --noEmit`；i18n:check = `node apps/mobile/scripts/check-locales.mjs`；licenses:check = `node scripts/build-licenses.mjs --check` |
-| `pnpm test` | `node --experimental-strip-types --experimental-test-module-mocks --test apps/mobile/tests/**/*.test.mjs` + `python3 verification/ui/runner_test.py` + `simulator_test.py` + `build_test.py` + `pnpm --filter @expo/dom-webview test` | 纯逻辑单测 + **验收基建自身的单测**（租约、并行编排、构建脚本） |
-| `pnpm verify:build` | `python3 apps/mobile/verification/build.py` | 构建 Debug 模拟器 App；stdout 只有 App 路径，stderr 是进度与日志位置；`--json` 给 app/derivedData/log |
-| `pnpm verify:ui` | `python3 apps/mobile/verification/ui/run.py` | 跑 UI 行为基线（默认全量；`--case` / `--batch` / `--parallel`） |
-| `pnpm verify:native` | `python3 apps/mobile/verification/native.py` | 编译并运行 Swift 行为断言（不依赖云端/凭据） |
-| `pnpm verify:simulator` | `python3 .../simulator.py --name X -- <cmd>` | 租一台 `Lody X Verify` 模拟器，导出 `LODY_VERIFY_UDID` 给子命令 |
-| `pnpm verify:clean` | `python3 .../clean.py` | 列出（`--apply` 删除）临时目录里被遗忘的 DerivedData / 复制的 checkout |
+| 命令                      | 实际执行                                                                                                                                                                                                                              | 作用                                                                                                                                              |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm start` / `pnpm ios` | 转发到 `@lody-ios/mobile`                                                                                                                                                                                                             | `start = expo start --dev-client`；`ios = prebuild && pods && expo run:ios --no-install`                                                          |
+| `pnpm prebuild`           | `native:assets && expo prebuild --platform ios --no-install`                                                                                                                                                                          | 先生成原生资源（离屏 HTML、许可证、图标 PNG），再生成 `ios/`                                                                                      |
+| `pnpm bundle`             | `native:assets && EXPO_NO_BUNDLE_SPLITTING=1 expo export --platform ios --output-dir .expo/export-check`                                                                                                                              | **不发版**的打包冒烟：能在 CI ubuntu 上验证 bundle 可产出                                                                                         |
+| `pnpm check`              | `typecheck && i18n:check && licenses:check && format:check`                                                                                                                                                                           | typecheck = `tsc --noEmit`；i18n:check = `node apps/mobile/scripts/check-locales.mjs`；licenses:check = `node scripts/build-licenses.mjs --check` |
+| `pnpm test`               | `node --experimental-strip-types --experimental-test-module-mocks --test apps/mobile/tests/**/*.test.mjs` + `python3 verification/ui/runner_test.py` + `simulator_test.py` + `build_test.py` + `pnpm --filter @expo/dom-webview test` | 纯逻辑单测 + **验收基建自身的单测**（租约、并行编排、构建脚本）                                                                                   |
+| `pnpm verify:build`       | `python3 apps/mobile/verification/build.py`                                                                                                                                                                                           | 构建 Debug 模拟器 App；stdout 只有 App 路径，stderr 是进度与日志位置；`--json` 给 app/derivedData/log                                             |
+| `pnpm verify:ui`          | `python3 apps/mobile/verification/ui/run.py`                                                                                                                                                                                          | 跑 UI 行为基线（默认全量；`--case` / `--batch` / `--parallel`）                                                                                   |
+| `pnpm verify:native`      | `python3 apps/mobile/verification/native.py`                                                                                                                                                                                          | 编译并运行 Swift 行为断言（不依赖云端/凭据）                                                                                                      |
+| `pnpm verify:simulator`   | `python3 .../simulator.py --name X -- <cmd>`                                                                                                                                                                                          | 租一台 `Lody X Verify` 模拟器，导出 `LODY_VERIFY_UDID` 给子命令                                                                                   |
+| `pnpm verify:clean`       | `python3 .../clean.py`                                                                                                                                                                                                                | 列出（`--apply` 删除）临时目录里被遗忘的 DerivedData / 复制的 checkout                                                                            |
 
 依赖要点（`apps/mobile/package.json`）：`expo ~57.0.20`、`expo-router`、`expo-dev-client`、`expo-updates`、`expo-localization`、`react-native 0.86.3`、`react-native-reanimated 4.5.1`、`react-native-screens`、`react-native-safe-area-context`、`react-native-worklets`、`react 19.2.3`；devDeps 只有 `@react-native/metro-config`、`@types/react`、`typescript ~6.0.3`。**没有**状态库——AGENTS.md:10 明确"add state libraries only when needed"。
 
@@ -123,9 +124,10 @@ apps/mobile/
 
 ```jsonc
 // modules/lody-kit/expo-module.config.json
-{ "platforms": ["ios"],
-  "ios": { "modules": ["LodyKitModule"],
-           "appDelegateSubscribers": ["PushAppDelegateSubscriber"] } }
+{
+  "platforms": ["ios"],
+  "ios": { "modules": ["LodyKitModule"], "appDelegateSubscribers": ["PushAppDelegateSubscriber"] },
+}
 ```
 
 ```jsonc
@@ -153,17 +155,17 @@ s.resource_bundles = { 'LodyKitShaders' => ['Chat/Shaders/*.metal'] }
 
 `src/`（TS facade）与 `ios/`（Swift）**同名功能目录**，功能内按 UI 部件继续对齐：
 
-| TS（`modules/lody-kit/src/`） | Swift（`modules/lody-kit/ios/`） | 注册名 |
-|---|---|---|
-| `runtime/LodyKit.ts`（NativeModule facade） | `LodyKitModule.swift` | `@ExpoModule("LodyKit")` |
-| `chat/NativeChat.tsx` | `Chat/LodyChatView.swift`（+ `ChatTranscript.swift` 等） | `View(LodyChatView.self)` |
-| `chat/NativeComposer.tsx` | `Chat/LodyComposerView.swift`、`ChatComposerView.swift` | `View(LodyComposerView.self)` |
-| `diff/NativeCodeView.tsx` | `Diff/LodyCodeView.swift` | `View(LodyCodeView.self)` |
-| `diff/NativeInlineDiff.tsx` | `Diff/LodyInlineDiffView.swift` | `View(LodyInlineDiffView.self)` |
-| `list/NativeGroupedList.tsx` / `NativePagedList.tsx` / `NativeSidebar.tsx` | `List/LodyGroupedList.swift` / `LodyPagedList.swift` / `LodySidebar.swift` | `View(...)` |
-| `chrome/NativeSymbolButton.tsx`、`NativeMenuButton.tsx`、`NativeSearchToolbar.tsx`、`NativeSplit.ts`、`NativeFloatingPanel.tsx` | `Chrome/LodySymbolButton.swift` … | `View(...)` |
-| `press/NativePressable.tsx`、`NativeGlassSurface.tsx` | `Press/LodyPressable.swift`、`LodyGlassSurface.swift` | `View(...)` |
-| `notifications/notifications.ts` | `Notifications/{PushNotifications,PushClickBuffer,LiveActivities}.swift` | `AsyncFunction` + `Events` |
+| TS（`modules/lody-kit/src/`）                                                                                                   | Swift（`modules/lody-kit/ios/`）                                           | 注册名                          |
+| ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------- |
+| `runtime/LodyKit.ts`（NativeModule facade）                                                                                     | `LodyKitModule.swift`                                                      | `@ExpoModule("LodyKit")`        |
+| `chat/NativeChat.tsx`                                                                                                           | `Chat/LodyChatView.swift`（+ `ChatTranscript.swift` 等）                   | `View(LodyChatView.self)`       |
+| `chat/NativeComposer.tsx`                                                                                                       | `Chat/LodyComposerView.swift`、`ChatComposerView.swift`                    | `View(LodyComposerView.self)`   |
+| `diff/NativeCodeView.tsx`                                                                                                       | `Diff/LodyCodeView.swift`                                                  | `View(LodyCodeView.self)`       |
+| `diff/NativeInlineDiff.tsx`                                                                                                     | `Diff/LodyInlineDiffView.swift`                                            | `View(LodyInlineDiffView.self)` |
+| `list/NativeGroupedList.tsx` / `NativePagedList.tsx` / `NativeSidebar.tsx`                                                      | `List/LodyGroupedList.swift` / `LodyPagedList.swift` / `LodySidebar.swift` | `View(...)`                     |
+| `chrome/NativeSymbolButton.tsx`、`NativeMenuButton.tsx`、`NativeSearchToolbar.tsx`、`NativeSplit.ts`、`NativeFloatingPanel.tsx` | `Chrome/LodySymbolButton.swift` …                                          | `View(...)`                     |
+| `press/NativePressable.tsx`、`NativeGlassSurface.tsx`                                                                           | `Press/LodyPressable.swift`、`LodyGlassSurface.swift`                      | `View(...)`                     |
+| `notifications/notifications.ts`                                                                                                | `Notifications/{PushNotifications,PushClickBuffer,LiveActivities}.swift`   | `AsyncFunction` + `Events`      |
 
 ### 2.3 Swift 侧的四种出口
 
@@ -198,6 +200,7 @@ public final class LodyKitModule: Module, @unchecked Sendable {
 ```
 
 约定：
+
 - **所有 `AsyncFunction` 都写 `.runOnQueue(...)`**；碰 UIKit 的用 `MainActor.assumeIsolated {}` 包裹（Swift 6 严格并发下的既定写法）。
 - **错误用 `throw` / `promise.reject(code, message)`**，不在 Swift 侧吞掉。
 - Debug-only 能力用 `#if DEBUG` 包住（`verifyPushSubscription`、`debugLiveActivity`、`--ui-verify` fixture 拦截）。
@@ -223,8 +226,10 @@ export const addDataRuntimeListener = (l: (e: DataRuntimeEvent) => void) =>
 View 型（`src/diff/NativeCodeView.tsx`）：类型化 props 只是**类型**，实现是 `requireNativeView`。
 
 ```tsx
-export const NativeCodeView: ComponentType<NativeCodeViewProps> =
-  requireNativeView('LodyKit', 'LodyCodeView');
+export const NativeCodeView: ComponentType<NativeCodeViewProps> = requireNativeView(
+  'LodyKit',
+  'LodyCodeView',
+);
 ```
 
 `src/index.ts` 是唯一出口：业务代码 `import { NativeChat, sendSessionTurn } from '@lody-ios/kit'`，禁止深路径 import（AGENTS.md:31）。
@@ -264,9 +269,12 @@ Memoh 的宿主侧（Go 后端、SSE 长连接、agent 会话）若要 watchdog�
    新模块要改 `expo-module.config.json` 的 `ios.modules` 与 `@ExpoModule("MemohKit")`（必须一致）。
 3. **TS wrapper**：`modules/memoh-kit/src/cards/NativeMemohCard.tsx`
    ```tsx
-   export const NativeMemohCard: ComponentType<ViewProps & {
-     title: string; onPress?: () => void;
-   }> = requireNativeView('MemohKit', 'MemohCardView');
+   export const NativeMemohCard: ComponentType<
+     ViewProps & {
+       title: string;
+       onPress?: () => void;
+     }
+   > = requireNativeView('MemohKit', 'MemohCardView');
    ```
    命令式方法加进 `src/runtime/MemohKit.ts` 的 interface 并导出 `memohPing`。
 4. **出口**：`src/index.ts` 加 `export { NativeMemohCard } from './cards/NativeMemohCard';`
@@ -342,11 +350,11 @@ src/ui/            共享 RN 组件
 
 三层，越往上越贵、越接近"用户看得见的行为"：
 
-| 层 | 命令 | 跑在哪 | 断什么 |
-|---|---|---|---|
-| ① 逻辑单测 | `pnpm test` | 本机 / CI ubuntu | 纯函数、协议、presentation session、**验收基建自身** |
-| ② 原生行为 | `pnpm verify:native` | macOS + 模拟器（`simctl spawn`）或直接 `swiftc` | 生产 Swift 类型的行为（不含 UI 像素） |
-| ③ UI 行为基线 | `pnpm verify:ui` | macOS + 租约模拟器 + 自有 Metro | 真实 App 可访问性树上的用户可见断言 + 截图 + 录屏 |
+| 层            | 命令                 | 跑在哪                                          | 断什么                                               |
+| ------------- | -------------------- | ----------------------------------------------- | ---------------------------------------------------- |
+| ① 逻辑单测    | `pnpm test`          | 本机 / CI ubuntu                                | 纯函数、协议、presentation session、**验收基建自身** |
+| ② 原生行为    | `pnpm verify:native` | macOS + 模拟器（`simctl spawn`）或直接 `swiftc` | 生产 Swift 类型的行为（不含 UI 像素）                |
+| ③ UI 行为基线 | `pnpm verify:ui`     | macOS + 租约模拟器 + 自有 Metro                 | 真实 App 可访问性树上的用户可见断言 + 截图 + 录屏    |
 
 ### 4.1 模拟器租约（`verification/simulator.py`）
 
@@ -360,6 +368,7 @@ MANAGED_NAME = re.compile(r'^Lody .+ Verify$')
 ```
 
 `SimulatorPool.lease(verify_name)` 语义（照抄即可）：
+
 1. 先拿 `.pool.lock`（`flock` 排他）串行化"选择设备"。
 2. 只考虑 `isAvailable` + deviceType 匹配 + 名字匹配 `Lody * Verify` 的设备——**个人设备、别的项目、旧 runtime 永不入选**。
 3. 候选按 `state != 'Shutdown'` 排序；已被别人锁住（`<udid>.lock` 非阻塞 `flock` 失败）的跳过；无空闲则 `simctl create 'Lody <name> Verify' <deviceType> <runtime>`。
@@ -417,6 +426,7 @@ READY   = {'send': 'send-status', 'composer': 'create-session-input', ...} # cas
 **catalog（`catalog.py`）**：断言用的生产文案 + UIKit 系统控件文案表（`Clear text`/`Close`/`Cancel`/`Paste`/`Next keyboard`…按语言分表）。用例写 `catalog.text('native.chat.attachment.preview', name=...)`，因此**断言同时证明了"当前跑的是哪个语言"**。
 
 **Metro 编排（`orchestrator.py`）**：
+
 - `managed_metro()`：先 `socket.create_connection` 探端口，**被占用就报错退出**（绝不挂到别人的 server/bundle）；用 `pnpm --filter @lody-ios/mobile exec expo start --dev-client --host lan --port N` 起独立进程组；环境注入 `EXPO_PUBLIC_UI_VERIFY=1`、`CI=1`、`EXPO_NO_DOTENV=1`、`REACT_NATIVE_PACKAGER_HOSTNAME=127.0.0.1`、`NODE_OPTIONS --require metro-diagnostics.cjs`；等 `/status` 返回 `packager-status:running`（90s）→ 请求 manifest 并把 `launchAsset` 完整读一遍（**预热 bundle**）。
 - `diagnose_metro()`：只探 `/status` + HEAD/GET `/?disableOnboarding=1`，记录状态码、字节数、耗时；注释明确**不记录 header、manifest、包体与环境变量**。
 - `run_batches()`：先全部 `Popen`（各自进程组 + `worker.log`）再轮询；**一个 batch 失败不取消兄弟**；最后合并 `results.json` 与 `batches.json`。
@@ -489,12 +499,12 @@ apps/mobile/verification/
 
 ### 5.1 `verify.yml`（PR + push main + dispatch，`concurrency: verify-<ref>` 可取消）
 
-| job | runner | 上限 | 干什么 |
-|---|---|---|---|
-| `checks` | ubuntu | 20 min | `pnpm install --frozen-lockfile` → `pnpm check` → `pnpm test` → `pnpm bundle` |
-| `native` | macos-26, Xcode 26.5 | 20 min | `simctl create 'Lody Offline UI'`（一次性）+ boot → `pnpm verify:native --udid`，`always()` 删设备 |
-| `build` | macos-26, Xcode 26.5, env `EXPO_PUBLIC_UI_VERIFY=1` | 45 min | ruby/bundler 缓存 → `pnpm prebuild` + `bundle exec pod install` → `APP=$(pnpm --silent verify:build --derived-data "$RUNNER_TEMP/lody-build")` → `tar` → 上传 `lody-simulator-<sha>`（保权限/符号链接，retention 3 天）与 `.artifacts/ui-build` 日志（14 天） |
-| `ui` ×3 | macos-26 | 60 min each | `needs: build`、`strategy.fail-fast: false`、matrix `[pages, send, chat]` → 安装**固定版本并校验 sha256 的 AXe 1.8.0** → 下载同一个 App tar → 自建模拟器 → `pnpm verify:ui --udid "$UI_UDID" --app ... --batch <m>` → `always()` 上传 `.artifacts/ui`（14 天）→ `always()` 删设备 |
+| job      | runner                                              | 上限        | 干什么                                                                                                                                                                                                                                                                            |
+| -------- | --------------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `checks` | ubuntu                                              | 20 min      | `pnpm install --frozen-lockfile` → `pnpm check` → `pnpm test` → `pnpm bundle`                                                                                                                                                                                                     |
+| `native` | macos-26, Xcode 26.5                                | 20 min      | `simctl create 'Lody Offline UI'`（一次性）+ boot → `pnpm verify:native --udid`，`always()` 删设备                                                                                                                                                                                |
+| `build`  | macos-26, Xcode 26.5, env `EXPO_PUBLIC_UI_VERIFY=1` | 45 min      | ruby/bundler 缓存 → `pnpm prebuild` + `bundle exec pod install` → `APP=$(pnpm --silent verify:build --derived-data "$RUNNER_TEMP/lody-build")` → `tar` → 上传 `lody-simulator-<sha>`（保权限/符号链接，retention 3 天）与 `.artifacts/ui-build` 日志（14 天）                     |
+| `ui` ×3  | macos-26                                            | 60 min each | `needs: build`、`strategy.fail-fast: false`、matrix `[pages, send, chat]` → 安装**固定版本并校验 sha256 的 AXe 1.8.0** → 下载同一个 App tar → 自建模拟器 → `pnpm verify:ui --udid "$UI_UDID" --app ... --batch <m>` → `always()` 上传 `.artifacts/ui`（14 天）→ `always()` 删设备 |
 
 要点：**缓存**是 pnpm 官方 action 默认缓存 + ruby `bundler-cache`；**并行**是"构建一次、三个 UI batch 并行消费同一产物"，而不是每 batch 各建一次；batch 间 `fail-fast: false` 保证一个红不影响另两个出证据。README 还提示：要把 Checks / Native behavior / Build iOS Simulator / 三个 UI check 都配成 branch rules 的 required checks，否则它们只是"绿了个寂寞"。
 
@@ -511,6 +521,7 @@ apps/mobile/verification/
 ### 5.3 `release.yml`（TestFlight，`workflow_call` + dispatch，`concurrency: testflight` 不取消）
 
 顺序（每步都有显式校验，**没有"希望它是对的"**）：
+
 1. checkout → 记录短 sha → 装 Xcode latest-stable / pnpm / node 22 / `asc` 4.11.0。
 2. `pnpm install --frozen-lockfile` → `pnpm native:assets` → 算 fingerprint（上游传了期望值就比对）→ 写 `EXPO_UPDATES_FINGERPRINT_OVERRIDE`。
 3. 把 `ASC_API_KEY_P8` 写到 `$RUNNER_TEMP/AuthKey_<id>.p8`（0600）。
@@ -534,32 +545,32 @@ apps/mobile/verification/
 
 `AGENTS.md`（`CLAUDE.md` 是软链）是这套范式最值钱的文件。
 
-| # | 规则（原文要点） | 防住什么坑 |
-|---|---|---|
-| 1 | iOS-only；**不加 Android 实现、fallback stub 或 Android 构建脚本** | 半吊子的 `Platform.OS` 分支会腐蚀每个原生模块的接口设计；一旦允许 stub，接口会退化成"两边都能编"的最小公倍数 |
-| 2 | **所有一方原生能力与原生 UI 只放 `modules/lody-kit`**，统一从 `LodyKitModule` 注册，不建独立 bridge 包；**RN 达不到的 UI 要求就用 Swift/UIKit 或 SwiftUI** | 多 bridge 包 → 多个 autolink 边界、多套并发约定；用 RN overlay 模拟系统效果 → 永远达不到 HIG 手感却看起来"差不多"，事后无人敢删 |
-| 3 | `apps/mobile/ios` 是 prebuild 产物；**改动必须落在 app config / 本地 config plugin / LodyKit，绝不能只改生成文件** | 手改生成物的下场是下次 `expo prebuild` 静默回滚，且表现为"本地好的、CI 坏"——最难查的一类回归 |
-| 4 | **保持正常 Xcode 签名（含 simulator 校验），不许 `CODE_SIGNING_ALLOWED=NO`** | 关签名能把"编不过"变成"编过"，从而丢失签名/entitlement 的真实错误；验收 App 与发布 App 的差异被掩盖 |
-| 5 | 云集成只对官方后端；**不要 import 会让 Metro 打不进的包**（Node/CRDT/Zstd 根入口）；用已验证的 RN-safe 子路径；不要跨 checkout 绝对 import 或私有后端包 | Metro 不是 Node：引入 Node 内置依赖的症状要到打包期或运行期才炸；跨 checkout 引用让 build 不可复现 |
-| 6 | **凭据只经 LodyKit 进 Keychain**；绝不把桌面凭据/token/transcript/私有服务配置拷进仓库 | 移动端最常见的泄漏路径就是"从桌面临时拷一份方便调试" |
-| 7 | 分层：routes/screens/features/models/cloud/ui + lib 基础设施；**features 不得 import screens**；打开会话走 `sessionNav` mailbox；`src/screens/` 只放 `*Screen` | 循环依赖与"UI 逻辑长在 feature 里"；mailbox 让导航需求可被单测 |
-| 8 | 原生导航栏统一透明 + 软滚动边缘；滚动页用 `ScrollViewMarker` + `softScrollEdgeEffects` + 自动 insets | 逐页手调 inset 必然漂移；iOS 26 滚动边缘是系统能力，别自己画 |
-| 9 | 改动前保留用户编辑；**破坏性 revert/restore/rollback 前必须看工作树并取得明确确认** | 防 agent 顺手"清理"用户未提交的工作 |
-| 10 | 改原生代码要用 `pnpm check`、`pnpm bundle` 和一次模拟器构建来验收；**优先行为检查而不是实现快照** | 实现快照（常量表、内部字段）会随重构频繁变红，且红的时候不说明用户可见行为坏了；行为检查才拦得住真回归 |
-| 11 | **不许嵌套三元**；闭集用字典映射，有序/重叠条件用 `if`/`switch`；`?.` 与 `??` 不算三元 | 嵌套三元的可读性灾难（有 `.cursor/rules/no-nested-ternary.mdc`） |
-| 12 | UI 基线：**Apple HIG 是首要要求**；不用绿色强调色/绿色底；用 UIKit 语义色 + system blue + 中性系统背景；保持自动暗色与对比度；保留原生导航/安全区/VoiceOver label/≥44pt；MVP 用默认字号，不为超大字号加特殊布局或 remount 逻辑 | 避免"品牌色盖系统语义色"导致暗色/对比度不可访问；避免为 AX 字号写第二套布局而无人维护 |
-| 13 | **不要用装饰性 RN overlay 模拟不可用的原生效果**；原生 UICollectionView 必须直接向 UIKit 注册；`ScrollViewMarker` 只接受 RN ScrollView | 和 #2 呼应的第二道防线：RN 的假玻璃/假 header 是长期维护债 |
-| 14 | 原生列表行选中态：跟随导航转场取消选中、交互式返回被取消时恢复；**不要在 diffable snapshot completion 里重新选中**（可能晚于返回时的取消） | UIKit 列表最经典的"幽灵选中"竞态 |
-| 15 | 页面：复用 `definePage`/`usePageRuntime`/`present`；路由文件只导出 `page.Route`；**不要再实现第二套 Modal 管理器**；`present` 参数只在内存、URL 只含 presentationId、原生返回/手势/卸载必须 settle | 两套模态机制 = 打开顺序/生命周期互相打架 |
-| 16 | 主页路径用 `style: 'push'` + 系统返回与交互式 pop；sheet 只给瞬时流程与 Debug 演示；Tab 用 NativeTabs 且每 tab 自带原生 Stack | 用 sheet 承载主路径会丢掉 iOS 的返回手势预期 |
-| 17 | **原生 API 只能从 `@lody-ios/kit` import**；TS facade / View wrapper / Swift 实现放在匹配的功能目录；**模块事件订阅必须在 unmount 时移除；UIKit 工作跑主队列** | 事件订阅泄漏 + 非主线程 UIKit 崩溃（两个都上线后才发现的） |
-| 18 | 故障注入、runtime 内部状态、Router/原生 demo 全部留在 dev-only `/debug`（从 Settings 进入）；**产品页面只暴露可行动的连接状态** | 防止调试后门进入产品 UI |
-| 19 | Swift 持有离屏 WebView 与 watchdog；**启动/心跳截止不能放 JS**；忽略被替换视图的回调；限制自动重启次数；**后台挂起不算 watchdog 失败**（保留 WebView、重置心跳、回前台恢复；只在缺失/失败时重建）；用户发起的发送只用短时 `UIApplication` 后台额度，**绝不请求会弹系统 Live Activity 的 `BGContinuedProcessingTask`**，不用 idle keepalive | 把健康判定放进会被挂起的 JS → 后台误判重启风暴；滥用后台任务 → 被系统杀 + 用户看到莫名灵动岛 |
-| 20 | 只有短时 Streams grant 进 bundled WebView，长期凭据留 Keychain；不加载远程脚本、不在诊断里暴露 token；登出/退订必须停掉自有 runtime | 减少可被离屏 WebView 窃取的凭据面 |
-| 21 | 原生输入 `ChatComposerView` 拥有共享草稿/恢复/模型控件；聊天直接内嵌，新建会话用 `NativeComposer`；**原生宿主在 window 坐标里测键盘重叠，不要套 RN 键盘避让**（sheet 局部坐标会低估）；sheet 宿主自行留底部安全区 | 键盘几何是这类 App 最容易反复回归的点；两套避让同时生效 = 抖动/回弹 |
-| 22 | **UI 基线必须无登录、无凭据、无云访问、无连接机器**；用生产组件 + `present` 加可独立重置的 Debug 场景，在边界注入确定性数据/服务结果；共享控件必须在**每个宿主**都跑；本地检查省略 `--udid` 走租约池、用 `verify:build`（一份 DerivedData、禁止 per-task `-derivedDataPath`、禁止复制 checkout、用 `verify:clean` 回收）、`verify:simulator --name` 包裹多步流程、**绝不直接 `simctl create`**；显式 `--udid` 只给 CI 这类调用方自己拥有的设备 | "需要登录才能验收"会让验收在 CI 里变成不可能；每任务一份 DerivedData 会让磁盘与构建时间爆炸 |
-| 23 | 截图证视觉状态、录屏证时间行为；**缺场景/超时即失败；截图本身不证明视觉正确** | 阻止"截了张图就算验过"的自欺 |
-| 24 | 推送：OneSignal 归 LodyKit 所有（RN 前初始化、缓存点击直到 JS ack、unmount 移除订阅）；NSE/App Group/SDK pin/entitlements 通过 plugin 持久化，**不要只改生成文件**；通知导航只接受旧 workspace/session 路由并对已登录用户的 catalog 解析；`recipientUserId` 给切换账号后的点击上锁；Debug 的离线通知 fixture 绝不初始化 SDK 或请求真实权限 | 账号切换后串号推送（事故级）、prebuild 回滚（同 #3） |
+| #   | 规则（原文要点）                                                                                                                                                                                                                                                                                                                                                                                                                               | 防住什么坑                                                                                                                      |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | iOS-only；**不加 Android 实现、fallback stub 或 Android 构建脚本**                                                                                                                                                                                                                                                                                                                                                                             | 半吊子的 `Platform.OS` 分支会腐蚀每个原生模块的接口设计；一旦允许 stub，接口会退化成"两边都能编"的最小公倍数                    |
+| 2   | **所有一方原生能力与原生 UI 只放 `modules/lody-kit`**，统一从 `LodyKitModule` 注册，不建独立 bridge 包；**RN 达不到的 UI 要求就用 Swift/UIKit 或 SwiftUI**                                                                                                                                                                                                                                                                                     | 多 bridge 包 → 多个 autolink 边界、多套并发约定；用 RN overlay 模拟系统效果 → 永远达不到 HIG 手感却看起来"差不多"，事后无人敢删 |
+| 3   | `apps/mobile/ios` 是 prebuild 产物；**改动必须落在 app config / 本地 config plugin / LodyKit，绝不能只改生成文件**                                                                                                                                                                                                                                                                                                                             | 手改生成物的下场是下次 `expo prebuild` 静默回滚，且表现为"本地好的、CI 坏"——最难查的一类回归                                    |
+| 4   | **保持正常 Xcode 签名（含 simulator 校验），不许 `CODE_SIGNING_ALLOWED=NO`**                                                                                                                                                                                                                                                                                                                                                                   | 关签名能把"编不过"变成"编过"，从而丢失签名/entitlement 的真实错误；验收 App 与发布 App 的差异被掩盖                             |
+| 5   | 云集成只对官方后端；**不要 import 会让 Metro 打不进的包**（Node/CRDT/Zstd 根入口）；用已验证的 RN-safe 子路径；不要跨 checkout 绝对 import 或私有后端包                                                                                                                                                                                                                                                                                        | Metro 不是 Node：引入 Node 内置依赖的症状要到打包期或运行期才炸；跨 checkout 引用让 build 不可复现                              |
+| 6   | **凭据只经 LodyKit 进 Keychain**；绝不把桌面凭据/token/transcript/私有服务配置拷进仓库                                                                                                                                                                                                                                                                                                                                                         | 移动端最常见的泄漏路径就是"从桌面临时拷一份方便调试"                                                                            |
+| 7   | 分层：routes/screens/features/models/cloud/ui + lib 基础设施；**features 不得 import screens**；打开会话走 `sessionNav` mailbox；`src/screens/` 只放 `*Screen`                                                                                                                                                                                                                                                                                 | 循环依赖与"UI 逻辑长在 feature 里"；mailbox 让导航需求可被单测                                                                  |
+| 8   | 原生导航栏统一透明 + 软滚动边缘；滚动页用 `ScrollViewMarker` + `softScrollEdgeEffects` + 自动 insets                                                                                                                                                                                                                                                                                                                                           | 逐页手调 inset 必然漂移；iOS 26 滚动边缘是系统能力，别自己画                                                                    |
+| 9   | 改动前保留用户编辑；**破坏性 revert/restore/rollback 前必须看工作树并取得明确确认**                                                                                                                                                                                                                                                                                                                                                            | 防 agent 顺手"清理"用户未提交的工作                                                                                             |
+| 10  | 改原生代码要用 `pnpm check`、`pnpm bundle` 和一次模拟器构建来验收；**优先行为检查而不是实现快照**                                                                                                                                                                                                                                                                                                                                              | 实现快照（常量表、内部字段）会随重构频繁变红，且红的时候不说明用户可见行为坏了；行为检查才拦得住真回归                          |
+| 11  | **不许嵌套三元**；闭集用字典映射，有序/重叠条件用 `if`/`switch`；`?.` 与 `??` 不算三元                                                                                                                                                                                                                                                                                                                                                         | 嵌套三元的可读性灾难（有 `.cursor/rules/no-nested-ternary.mdc`）                                                                |
+| 12  | UI 基线：**Apple HIG 是首要要求**；不用绿色强调色/绿色底；用 UIKit 语义色 + system blue + 中性系统背景；保持自动暗色与对比度；保留原生导航/安全区/VoiceOver label/≥44pt；MVP 用默认字号，不为超大字号加特殊布局或 remount 逻辑                                                                                                                                                                                                                 | 避免"品牌色盖系统语义色"导致暗色/对比度不可访问；避免为 AX 字号写第二套布局而无人维护                                           |
+| 13  | **不要用装饰性 RN overlay 模拟不可用的原生效果**；原生 UICollectionView 必须直接向 UIKit 注册；`ScrollViewMarker` 只接受 RN ScrollView                                                                                                                                                                                                                                                                                                         | 和 #2 呼应的第二道防线：RN 的假玻璃/假 header 是长期维护债                                                                      |
+| 14  | 原生列表行选中态：跟随导航转场取消选中、交互式返回被取消时恢复；**不要在 diffable snapshot completion 里重新选中**（可能晚于返回时的取消）                                                                                                                                                                                                                                                                                                     | UIKit 列表最经典的"幽灵选中"竞态                                                                                                |
+| 15  | 页面：复用 `definePage`/`usePageRuntime`/`present`；路由文件只导出 `page.Route`；**不要再实现第二套 Modal 管理器**；`present` 参数只在内存、URL 只含 presentationId、原生返回/手势/卸载必须 settle                                                                                                                                                                                                                                             | 两套模态机制 = 打开顺序/生命周期互相打架                                                                                        |
+| 16  | 主页路径用 `style: 'push'` + 系统返回与交互式 pop；sheet 只给瞬时流程与 Debug 演示；Tab 用 NativeTabs 且每 tab 自带原生 Stack                                                                                                                                                                                                                                                                                                                  | 用 sheet 承载主路径会丢掉 iOS 的返回手势预期                                                                                    |
+| 17  | **原生 API 只能从 `@lody-ios/kit` import**；TS facade / View wrapper / Swift 实现放在匹配的功能目录；**模块事件订阅必须在 unmount 时移除；UIKit 工作跑主队列**                                                                                                                                                                                                                                                                                 | 事件订阅泄漏 + 非主线程 UIKit 崩溃（两个都上线后才发现的）                                                                      |
+| 18  | 故障注入、runtime 内部状态、Router/原生 demo 全部留在 dev-only `/debug`（从 Settings 进入）；**产品页面只暴露可行动的连接状态**                                                                                                                                                                                                                                                                                                                | 防止调试后门进入产品 UI                                                                                                         |
+| 19  | Swift 持有离屏 WebView 与 watchdog；**启动/心跳截止不能放 JS**；忽略被替换视图的回调；限制自动重启次数；**后台挂起不算 watchdog 失败**（保留 WebView、重置心跳、回前台恢复；只在缺失/失败时重建）；用户发起的发送只用短时 `UIApplication` 后台额度，**绝不请求会弹系统 Live Activity 的 `BGContinuedProcessingTask`**，不用 idle keepalive                                                                                                     | 把健康判定放进会被挂起的 JS → 后台误判重启风暴；滥用后台任务 → 被系统杀 + 用户看到莫名灵动岛                                    |
+| 20  | 只有短时 Streams grant 进 bundled WebView，长期凭据留 Keychain；不加载远程脚本、不在诊断里暴露 token；登出/退订必须停掉自有 runtime                                                                                                                                                                                                                                                                                                            | 减少可被离屏 WebView 窃取的凭据面                                                                                               |
+| 21  | 原生输入 `ChatComposerView` 拥有共享草稿/恢复/模型控件；聊天直接内嵌，新建会话用 `NativeComposer`；**原生宿主在 window 坐标里测键盘重叠，不要套 RN 键盘避让**（sheet 局部坐标会低估）；sheet 宿主自行留底部安全区                                                                                                                                                                                                                              | 键盘几何是这类 App 最容易反复回归的点；两套避让同时生效 = 抖动/回弹                                                             |
+| 22  | **UI 基线必须无登录、无凭据、无云访问、无连接机器**；用生产组件 + `present` 加可独立重置的 Debug 场景，在边界注入确定性数据/服务结果；共享控件必须在**每个宿主**都跑；本地检查省略 `--udid` 走租约池、用 `verify:build`（一份 DerivedData、禁止 per-task `-derivedDataPath`、禁止复制 checkout、用 `verify:clean` 回收）、`verify:simulator --name` 包裹多步流程、**绝不直接 `simctl create`**；显式 `--udid` 只给 CI 这类调用方自己拥有的设备 | "需要登录才能验收"会让验收在 CI 里变成不可能；每任务一份 DerivedData 会让磁盘与构建时间爆炸                                     |
+| 23  | 截图证视觉状态、录屏证时间行为；**缺场景/超时即失败；截图本身不证明视觉正确**                                                                                                                                                                                                                                                                                                                                                                  | 阻止"截了张图就算验过"的自欺                                                                                                    |
+| 24  | 推送：OneSignal 归 LodyKit 所有（RN 前初始化、缓存点击直到 JS ack、unmount 移除订阅）；NSE/App Group/SDK pin/entitlements 通过 plugin 持久化，**不要只改生成文件**；通知导航只接受旧 workspace/session 路由并对已登录用户的 catalog 解析；`recipientUserId` 给切换账号后的点击上锁；Debug 的离线通知 fixture 绝不初始化 SDK 或请求真实权限                                                                                                     | 账号切换后串号推送（事故级）、prebuild 回滚（同 #3）                                                                            |
 
 只能搬三条就搬：**#2/#3（原生只在一个 Kit、只改真源）**、**#22（验收必须无凭据可复现）**、**#10/#23（行为优先、证据分工）**。
 
@@ -655,6 +666,7 @@ cd ../.. && pnpm add -Dw @babel/core babel-preset-expo esbuild prettier
 ```
 
 照抄并改名：
+
 - `app.config.ts`：`name: 'Memoh'`、`slug: 'memoh-ios'`、`platforms: ['ios']`、`scheme: 'memoh'`、自己的 `bundleIdentifier` / `appleTeamId`、`ios.deploymentTarget: '26.0'`、`experiments: { typedRoutes: true, reactCompiler: true }`、`runtimeVersion: { policy: 'fingerprint' }`。**先不写 `updates` 段**（等 OTA 服务就绪）。
 - `metro.config.js`：保留 `config.cacheVersion += ':' + __dirname;` 那一行。
 - `index.js`、`tsconfig.json`（`paths` 里的 kit alias 指向 `./modules/memoh-kit/src`）。
@@ -675,6 +687,7 @@ mkdir -p apps/mobile/modules/memoh-kit/{ios/{Chrome,Cards},src/{chrome,cards,run
 ```
 
 抄并改名：
+
 - `expo-module.config.json` → `{ "platforms": ["ios"], "ios": { "modules": ["MemohKitModule"] } }`
 - `package.json` → `name: "@memoh-ios/kit"`, `main: "src/index.ts"`
 - `ios/MemohKit.podspec` → `platform :ios, '26.0'`、`swift_version = '6.0'`、`static_framework = true`、`dependency 'ExpoModulesCore'`、`source_files = '**/*.{swift,h,m}'`。**先不要**预编译相关的 `macros_plugin` xcconfig 与 `spm_dependency`，等真的启用预编译/SPM 再加。

@@ -231,7 +231,8 @@ export function SessionProvider({
     const client = state.client;
 
     const realtime = new MemohRealtime({
-      wsUrl: client.url,
+      baseUrl: client.url,
+      botId: currentBot.id,
       getToken: () => client.token(),
       listener: {
         onStateChange: (connection) => dispatch({ type: 'connection', state: connection }),
@@ -247,7 +248,8 @@ export function SessionProvider({
           dispatch({
             type: 'chat',
             sessionId,
-            update: (chat) => applyDelta(chat, frame.epoch, frame.seq, frame.delta as unknown as RuntimeDelta),
+            update: (chat) =>
+              applyDelta(chat, frame.epoch, frame.seq, frame.delta as unknown as RuntimeDelta),
           });
         },
         onGap: () => {
@@ -313,7 +315,10 @@ export function SessionProvider({
   // ------------------------------------------------------------ 动作
 
   const selectBot = useCallback((botId: string) => dispatch({ type: 'selectBot', botId }), []);
-  const openSession = useCallback((sessionId: string) => dispatch({ type: 'openSession', sessionId }), []);
+  const openSession = useCallback(
+    (sessionId: string) => dispatch({ type: 'openSession', sessionId }),
+    [],
+  );
   const closeSession = useCallback(() => {
     const sessionId = stateRef.current.currentSessionId;
     if (sessionId !== null) realtimeRef.current?.unsubscribe(sessionId);

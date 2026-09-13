@@ -100,7 +100,11 @@ export class MemohClient {
   private async request<T>(
     method: string,
     path: string,
-    options: { body?: unknown; query?: Record<string, string | number | undefined>; authenticated?: boolean } = {},
+    options: {
+      body?: unknown;
+      query?: Record<string, string | number | undefined>;
+      authenticated?: boolean;
+    } = {},
   ): Promise<T> {
     const { body, query, authenticated = true } = options;
     const url = new URL(this.resolve(path));
@@ -168,7 +172,10 @@ export class MemohClient {
 
   // -------------------------------------------------------------- 会话
 
-  listSessions(botId: string, options: { limit?: number; cursor?: string } = {}): Promise<ListSessionsResponse> {
+  listSessions(
+    botId: string,
+    options: { limit?: number; cursor?: string } = {},
+  ): Promise<ListSessionsResponse> {
     return this.request<ListSessionsResponse>('GET', `/bots/${botId}/sessions`, {
       query: { limit: options.limit, cursor: options.cursor },
     });
@@ -196,13 +203,20 @@ export class MemohClient {
     options: { limit?: number; beforeMessageId?: string | number } = {},
   ): Promise<UIMessageListResponse> {
     return this.request<UIMessageListResponse>('GET', `/bots/${botId}/messages`, {
-      query: { session_id: sessionId, limit: options.limit, before_message_id: options.beforeMessageId },
+      query: {
+        session_id: sessionId,
+        limit: options.limit,
+        before_message_id: options.beforeMessageId,
+      },
     });
   }
 
   /** 会话上下文用量 / 缓存命中 / 技能列表。**不是**运行状态。 */
   sessionStatus(botId: string, sessionId: string): Promise<Record<string, unknown>> {
-    return this.request<Record<string, unknown>>('GET', `/bots/${botId}/sessions/${sessionId}/status`);
+    return this.request<Record<string, unknown>>(
+      'GET',
+      `/bots/${botId}/sessions/${sessionId}/status`,
+    );
   }
 
   // -------------------------------------------------------------- 用量

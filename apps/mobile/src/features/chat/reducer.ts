@@ -35,7 +35,12 @@ import type {
   RenderMessage,
   RenderTurn,
 } from '../../models/chat.ts';
-import { approvalTone, attachmentRef, fallbackOptionKey, toolStatusFrom } from '../../models/chat.ts';
+import {
+  approvalTone,
+  attachmentRef,
+  fallbackOptionKey,
+  toolStatusFrom,
+} from '../../models/chat.ts';
 
 /** 流式缓冲：message id → 累加内容。 */
 export type StreamMap = Record<string, { type: 'text' | 'reasoning'; content: string }>;
@@ -147,7 +152,11 @@ export function blocksFromMessage(
       blocks.push({ kind: 'notice', key, text: message.content ?? '', code: message.name });
       break;
     case 'attachments':
-      blocks.push({ kind: 'attachments', key, items: (message.attachments ?? []).map(attachmentRef) });
+      blocks.push({
+        kind: 'attachments',
+        key,
+        items: (message.attachments ?? []).map(attachmentRef),
+      });
       break;
     default:
       // 服务端可能加新块类型。静默丢弃比崩溃好，Debug 页能看出来。
@@ -170,7 +179,13 @@ function userTurnToMessage(turn: UITurn): RenderMessage {
       items: turn.attachments.map(attachmentRef),
     });
   }
-  return { key: turn.turn_id, role: 'user', blocks, turnKey: turn.turn_id, createdAt: turn.timestamp };
+  return {
+    key: turn.turn_id,
+    role: 'user',
+    blocks,
+    turnKey: turn.turn_id,
+    createdAt: turn.timestamp,
+  };
 }
 
 /** 助手轮次（`role: 'assistant'`）变成一条渲染消息。 */
@@ -179,7 +194,13 @@ function assistantTurnToMessage(turn: UITurn, streams: StreamMap): RenderMessage
   for (const message of turn.messages ?? []) {
     blocks.push(...blocksFromMessage(message, streams[String(message.id)]));
   }
-  return { key: turn.turn_id, role: 'assistant', blocks, turnKey: turn.turn_id, createdAt: turn.timestamp };
+  return {
+    key: turn.turn_id,
+    role: 'assistant',
+    blocks,
+    turnKey: turn.turn_id,
+    createdAt: turn.timestamp,
+  };
 }
 
 function positionOf(turn: UITurn, fallback: number): number {
@@ -198,7 +219,8 @@ export function renderTurns(turns: UITurn[], streams: StreamMap): RenderTurn[] {
 
   for (const turn of turns) {
     const existing = byKey.get(turn.turn_id);
-    const message = turn.role === 'user' ? userTurnToMessage(turn) : assistantTurnToMessage(turn, streams);
+    const message =
+      turn.role === 'user' ? userTurnToMessage(turn) : assistantTurnToMessage(turn, streams);
     if (existing !== undefined) {
       if (turn.role === 'user') existing.user = message;
       else existing.assistant = message;
@@ -427,7 +449,12 @@ function hasServerTurn(state: ChatState, run: CurrentRunView | null, key: string
  * `epoch` 与本地不一致时**不做增量合并**——跨 epoch 的 seq 没有意义，唯一正确的
  * 反应是丢弃并等新 snapshot。调用方（realtime）已经会重订阅，这里只标记过期。
  */
-export function applyDelta(state: ChatState, epoch: string, seq: number, delta: RuntimeDelta): ChatState {
+export function applyDelta(
+  state: ChatState,
+  epoch: string,
+  seq: number,
+  delta: RuntimeDelta,
+): ChatState {
   if (state.epoch !== null && state.epoch !== epoch) {
     return { ...state, stale: true };
   }
@@ -436,7 +463,15 @@ export function applyDelta(state: ChatState, epoch: string, seq: number, delta: 
 
   if (delta.reset_messages === true) {
     // 服务端 `retry`：丢弃本地推测的流式内容，保留已确认的整块历史。
-    next = { ...next, streams: {}, progress: {}, blocks: {}, order: [], stale: false, optimistic: [] };
+    next = {
+      ...next,
+      streams: {},
+      progress: {},
+      blocks: {},
+      order: [],
+      stale: false,
+      optimistic: [],
+    };
   }
 
   next = applyUpserts(next, delta.message_upserts ?? []);

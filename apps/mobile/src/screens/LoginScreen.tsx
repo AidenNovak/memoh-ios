@@ -21,7 +21,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ApiError, MemohClient } from '../api/client.ts';
-import { saveSession } from '../api/credentials.ts';
+import { getFreshToken, saveSession } from '../api/credentials.ts';
 import { useT } from '../lib/i18n/useT.ts';
 import { usePalette, useTheme } from '../lib/theme/context.tsx';
 import type { SessionSeed } from '../features/session/store.tsx';
@@ -80,8 +80,9 @@ export function LoginScreen({
         timezone: response.timezone,
       });
 
-      // 真正的 client 从 Keychain 读 token，而不是闭包捕获——续期后要拿到新值。
-      const authed = new MemohClient({ baseUrl, getToken: () => response.access_token });
+      // 真正的 client 从凭据存储读 token，而不是闭包捕获一个快照——续期之后
+      // 闭包里那个旧字符串会失效，而 `getFreshToken()` 永远是当前有效的那个。
+      const authed = new MemohClient({ baseUrl, getToken: () => getFreshToken() });
       onSignedIn({ client: authed });
     } catch (caught) {
       if (caught instanceof ApiError) {
@@ -117,7 +118,9 @@ export function LoginScreen({
         <Text style={[typography.largeTitle, { color: palette.label, marginBottom: spacing.xs }]}>
           {t('login.title')}
         </Text>
-        <Text style={[typography.subhead, { color: palette.secondaryLabel, marginBottom: spacing.xl }]}>
+        <Text
+          style={[typography.subhead, { color: palette.secondaryLabel, marginBottom: spacing.xl }]}
+        >
           {t('login.subtitle')}
         </Text>
 
@@ -176,7 +179,12 @@ export function LoginScreen({
           {busy ? (
             <ActivityIndicator color="#FFFFFF" />
           ) : (
-            <Text style={[typography.headline, { color: canSubmit ? '#FFFFFF' : palette.tertiaryLabel }]}>
+            <Text
+              style={[
+                typography.headline,
+                { color: canSubmit ? '#FFFFFF' : palette.tertiaryLabel },
+              ]}
+            >
               {t('login.submit')}
             </Text>
           )}

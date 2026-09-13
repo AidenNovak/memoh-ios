@@ -291,3 +291,12 @@ export interface TokenUsage {
   cost?: number;
   [key: string]: unknown;
 }
+
+/** 建会话接口返回的形状在 swagger 里是空的，这里做一次显式窄化。 */
+export function createdSessionId(response: unknown): string | null {
+  if (response === null || typeof response !== 'object') return null;
+  const record = response as Record<string, unknown>;
+  if (typeof record.id === 'string') return record.id;
+  if (typeof record.session_id === 'string') return record.session_id;
+  return null;
+}

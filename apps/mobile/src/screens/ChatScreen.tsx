@@ -38,8 +38,16 @@ export function ChatScreen() {
   const t = useT();
   const router = useRouter();
 
-  const { state, openSession, closeSession, sendMessage, abort, chatFor, respondApproval, realtimeEnabled } =
-    useSession();
+  const {
+    state,
+    openSession,
+    closeSession,
+    sendMessage,
+    abort,
+    chatFor,
+    respondApproval,
+    realtimeEnabled,
+  } = useSession();
 
   // `new` 是一条真实的路由，但还没有会话 id；第一次发送时由服务端建会话。
   useEffect(() => {
@@ -51,6 +59,10 @@ export function ChatScreen() {
 
   const chat: ChatState = chatFor(isNew ? '' : sessionId);
   const turns = useMemo(() => turnsForDisplay(chat).filter(hasContent), [chat]);
+  // 标题取会话自己的名字——写死成"会话"会让所有会话长得一样，用户没法确认
+  // 自己在跟哪一轮对话。
+  const sessionTitle =
+    state.sessions.find((entry) => entry.id === sessionId)?.title ?? t('chat.placeholder');
 
   const [draft, setDraft] = useState('');
   const listRef = useRef<FlatList<RenderTurn>>(null);
@@ -93,7 +105,7 @@ export function ChatScreen() {
           <Text style={[typography.body, { color: palette.accent }]}>‹</Text>
         </Pressable>
         <Text style={[typography.headline, { color: palette.label, flex: 1 }]} numberOfLines={1}>
-          {isNew ? t('home.newSession') : t('home.title')}
+          {isNew ? t('home.newSession') : sessionTitle}
         </Text>
         {chat.stale ? (
           <Text style={[typography.caption, { color: palette.warning }]}>{t('chat.gap')}</Text>
@@ -122,7 +134,9 @@ export function ChatScreen() {
             <Text style={[typography.headline, { color: palette.label, marginBottom: spacing.xs }]}>
               {t('chat.empty.title')}
             </Text>
-            <Text style={[typography.subhead, { color: palette.secondaryLabel, textAlign: 'center' }]}>
+            <Text
+              style={[typography.subhead, { color: palette.secondaryLabel, textAlign: 'center' }]}
+            >
               {t('chat.empty.body')}
             </Text>
           </View>
@@ -145,7 +159,9 @@ export function ChatScreen() {
               { backgroundColor: palette.field, opacity: pressed ? 0.8 : 1 },
             ]}
           >
-            <Text style={[typography.subhead, { color: palette.destructive }]}>{t('chat.stop')}</Text>
+            <Text style={[typography.subhead, { color: palette.destructive }]}>
+              {t('chat.stop')}
+            </Text>
           </Pressable>
         </View>
       ) : null}
@@ -310,10 +326,15 @@ function BlockView({ block }: { block: RenderBlock }) {
                       : palette.success,
               }}
             />
-            <Text style={[typography.footnote, { color: palette.secondaryLabel, flex: 1 }]} numberOfLines={1}>
+            <Text
+              style={[typography.footnote, { color: palette.secondaryLabel, flex: 1 }]}
+              numberOfLines={1}
+            >
               {block.title !== '' ? block.title : block.name}
             </Text>
-            {block.status === 'running' ? <ActivityIndicator size="small" color={palette.secondaryLabel} /> : null}
+            {block.status === 'running' ? (
+              <ActivityIndicator size="small" color={palette.secondaryLabel} />
+            ) : null}
           </View>
         </View>
       );

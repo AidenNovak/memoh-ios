@@ -9,20 +9,20 @@
 
 ## 0. 结论速览
 
-| 问题 | 结论 |
-|---|---|
-| App 实时通道 | **WebSocket `/bots/{bot_id}/web/ws`**，不是 SSE。聊天内容、审批、中断全走它 |
-| 鉴权 | `POST /auth/login` → HS256 JWT，默认 168h，**无 refresh token**，`/auth/refresh` 只能拿未过期 token 续期 |
-| 存 token | Keychain。禁止 localStorage/cookie 那套（那是 Web 的） |
-| API key | **没有**通用 API key / PAT；`/users/me/runtimes` 的 key 只对 Remote Runtime 反向 RPC 管道有效，不能当 API token |
-| OAuth / device flow | **没有**面向 Memoh 账号的。仓库里唯一的 device flow 是 Codex CLI 登录（`/bots/{bot_id}/agents/{id}/codex/login/device/*`），与本 App 登录无关 |
-| 关键坑 1 | 发消息的连接**不会**直接收到文本流；必须先 `runtime_subscribe` 订阅该会话，否则只有 `run_accepted` 和错误帧 |
-| 关键坑 2 | 服务端 WS **没有心跳/ping**，移动网络下 NAT 超时会静默断连，客户端必须自己保活 + 重连 + 靠 snapshot 恢复 |
-| 关键坑 3 | `?token=` query 只保留给浏览器（WebSocket 不能设 header）。原生 App **应当**用 `Authorization` header |
-| 关键坑 4 | `GET /container/fs/list` 的 JSON key 是 **camelCase**（`modTime`/`isDir`），全仓其余是 snake_case |
-| 关键坑 5 | 除公开 webhook 外**没有请求体大小限制**，`fs/read` 会把整个文件读进内存再 JSON 化 |
-| SDK | `@memohai/sdk` 是纯 fetch 生成的 TS，**无 Node 内建依赖**；唯一 RN 不友好处是 SSE helper（`ReadableStream` + `TextDecoderStream`）。REST 部分大概率能直接用于 RN |
-| 官方移动端 | **没有原生 App 计划**。唯一相关文档是 `docs/design/web-mobile-shell/PLAN.md`——那是 **Web 响应式**（Vue 断点分叉），不是原生客户端 |
+| 问题                | 结论                                                                                                                                                             |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| App 实时通道        | **WebSocket `/bots/{bot_id}/web/ws`**，不是 SSE。聊天内容、审批、中断全走它                                                                                      |
+| 鉴权                | `POST /auth/login` → HS256 JWT，默认 168h，**无 refresh token**，`/auth/refresh` 只能拿未过期 token 续期                                                         |
+| 存 token            | Keychain。禁止 localStorage/cookie 那套（那是 Web 的）                                                                                                           |
+| API key             | **没有**通用 API key / PAT；`/users/me/runtimes` 的 key 只对 Remote Runtime 反向 RPC 管道有效，不能当 API token                                                  |
+| OAuth / device flow | **没有**面向 Memoh 账号的。仓库里唯一的 device flow 是 Codex CLI 登录（`/bots/{bot_id}/agents/{id}/codex/login/device/*`），与本 App 登录无关                    |
+| 关键坑 1            | 发消息的连接**不会**直接收到文本流；必须先 `runtime_subscribe` 订阅该会话，否则只有 `run_accepted` 和错误帧                                                      |
+| 关键坑 2            | 服务端 WS **没有心跳/ping**，移动网络下 NAT 超时会静默断连，客户端必须自己保活 + 重连 + 靠 snapshot 恢复                                                         |
+| 关键坑 3            | `?token=` query 只保留给浏览器（WebSocket 不能设 header）。原生 App **应当**用 `Authorization` header                                                            |
+| 关键坑 4            | `GET /container/fs/list` 的 JSON key 是 **camelCase**（`modTime`/`isDir`），全仓其余是 snake_case                                                                |
+| 关键坑 5            | 除公开 webhook 外**没有请求体大小限制**，`fs/read` 会把整个文件读进内存再 JSON 化                                                                                |
+| SDK                 | `@memohai/sdk` 是纯 fetch 生成的 TS，**无 Node 内建依赖**；唯一 RN 不友好处是 SSE helper（`ReadableStream` + `TextDecoderStream`）。REST 部分大概率能直接用于 RN |
+| 官方移动端          | **没有原生 App 计划**。唯一相关文档是 `docs/design/web-mobile-shell/PLAN.md`——那是 **Web 响应式**（Vue 断点分叉），不是原生客户端                                |
 
 ---
 
@@ -84,12 +84,22 @@ Web 端把 token 放 `localStorage.token` 并作为 `Authorization: Bearer` 发�
 
 ```json
 {
-  "id": "uuid", "username": "admin", "email": "admin@memoh.local",
-  "role": "admin", "display_name": "Admin", "avatar_url": "",
-  "timezone": "Asia/Shanghai", "is_active": true,
-  "principal_is_active": true, "membership_is_active": true,
-  "metadata": {}, "created_at": "...", "updated_at": "...",
-  "joined_at": "...", "membership_updated_at": "...", "last_login_at": "...",
+  "id": "uuid",
+  "username": "admin",
+  "email": "admin@memoh.local",
+  "role": "admin",
+  "display_name": "Admin",
+  "avatar_url": "",
+  "timezone": "Asia/Shanghai",
+  "is_active": true,
+  "principal_is_active": true,
+  "membership_is_active": true,
+  "metadata": {},
+  "created_at": "...",
+  "updated_at": "...",
+  "joined_at": "...",
+  "membership_updated_at": "...",
+  "last_login_at": "...",
   "title_model_id": ""
 }
 ```
@@ -115,13 +125,13 @@ Web 端把 token 放 `localStorage.token` 并作为 `Authorization: Bearer` 发�
 
 路由注册在 `internal/handlers/local_channel.go:162-169`（`prefix = /bots/:bot_id/<channelType>`，channelType 对 Web 是 `web`）和 `internal/handlers/message.go:121-133`。
 
-| 端点 | 协议 | 用途 | App 该不该用 |
-|---|---|---|---|
-| `GET /bots/{bot_id}/web/ws` | WebSocket | **双向**：发消息、中断、审批、`runtime_subscribe`，也是唯一回传聊天内容的通道 | ✅ **核心通道** |
-| `GET /bots/{bot_id}/web/stream` | SSE | 只读的**本地 channel 出站事件流**（`channel.StreamEvent`），属于旧的 channel 抽象 | ❌ 不用 |
-| `POST /bots/{bot_id}/web/messages` | HTTP | 旧的一次性发消息入口。**服务端主动拒绝 slash 控制输入**（`internal/handlers/local_channel.go:853-862` 返回 `CodeUnsupportedLegacyEndpoint`） | ❌ 不用 |
-| `GET /bots/{bot_id}/sessions/events` | SSE | **bot 级会话活动流**：`session_touched` / `session_title_changed` / `session_created` / `session_compaction` / `dropped` / `ping`。**不含消息体** | ✅ 可选，用于会话列表实时排序 |
-| `GET /bots/{bot_id}/sessions/{session_id}/status` | HTTP | 会话上下文用量/缓存命中/技能列表（**不是**运行状态） | ✅ 按需 |
+| 端点                                              | 协议      | 用途                                                                                                                                              | App 该不该用                  |
+| ------------------------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| `GET /bots/{bot_id}/web/ws`                       | WebSocket | **双向**：发消息、中断、审批、`runtime_subscribe`，也是唯一回传聊天内容的通道                                                                     | ✅ **核心通道**               |
+| `GET /bots/{bot_id}/web/stream`                   | SSE       | 只读的**本地 channel 出站事件流**（`channel.StreamEvent`），属于旧的 channel 抽象                                                                 | ❌ 不用                       |
+| `POST /bots/{bot_id}/web/messages`                | HTTP      | 旧的一次性发消息入口。**服务端主动拒绝 slash 控制输入**（`internal/handlers/local_channel.go:853-862` 返回 `CodeUnsupportedLegacyEndpoint`）      | ❌ 不用                       |
+| `GET /bots/{bot_id}/sessions/events`              | SSE       | **bot 级会话活动流**：`session_touched` / `session_title_changed` / `session_created` / `session_compaction` / `dropped` / `ping`。**不含消息体** | ✅ 可选，用于会话列表实时排序 |
+| `GET /bots/{bot_id}/sessions/{session_id}/status` | HTTP      | 会话上下文用量/缓存命中/技能列表（**不是**运行状态）                                                                                              | ✅ 按需                       |
 
 关于 `/web/stream` 和 `/web/messages` 的判定依据：当前 Web 前端**完全没有调用它们**——`grep` 全仓 `apps/web/src` 与 `apps/desktop/src` 只有 SSE 的 `sessions/events` 和 WS 的 `web/ws` 被使用（`apps/web/src/store/chat/realtime.ts:1-14`、`apps/web/src/composables/api/useChat.message-api.ts:158`）。SDK 里虽然生成了 `getBotsByBotIdWebStream` / `postBotsByBotIdWebMessages`（`packages/sdk/src/sdk.gen.ts:1812, 1825`），但它们是历史遗留。**iOS 不要碰**。
 
@@ -151,16 +161,16 @@ Authorization: Bearer <jwt>
 
 `type` 取值与必填字段：
 
-| type | 必填 | 可选 |
-|---|---|---|
-| `message` | `invocation_id` | `session_id`（空则自动建会话）、`text`、`attachments`、`requested_skills`、`model_id`、`reasoning_effort`、`workspace_target_id`、`composer_scope` |
-| `retry_message` | `invocation_id`, `session_id`, `turn_id` | `model_id`, `reasoning_effort`, `workspace_target_id`（`message_id` 是 `turn_id` 的废弃别名） |
-| `edit_message` | `invocation_id`, `session_id`, `turn_id` | `text`, `attachments`, + 同上 |
-| `abort` | `run_id`, `session_id`, `control_id` | —— |
-| `tool_approval_response` | `run_id`, `session_id`, `decision_id`, `control_id` | `decision`(`approve`/`reject`)、`option_id`、`reason` |
-| `user_input_response` | `run_id`, `session_id`, `decision_id`, `control_id` | `answers`, `canceled`, `reason` |
-| `runtime_subscribe` | `session_id` | `cursor` `{epoch, seq}` |
-| `runtime_unsubscribe` | `session_id` | —— |
+| type                     | 必填                                                | 可选                                                                                                                                               |
+| ------------------------ | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `message`                | `invocation_id`                                     | `session_id`（空则自动建会话）、`text`、`attachments`、`requested_skills`、`model_id`、`reasoning_effort`、`workspace_target_id`、`composer_scope` |
+| `retry_message`          | `invocation_id`, `session_id`, `turn_id`            | `model_id`, `reasoning_effort`, `workspace_target_id`（`message_id` 是 `turn_id` 的废弃别名）                                                      |
+| `edit_message`           | `invocation_id`, `session_id`, `turn_id`            | `text`, `attachments`, + 同上                                                                                                                      |
+| `abort`                  | `run_id`, `session_id`, `control_id`                | ——                                                                                                                                                 |
+| `tool_approval_response` | `run_id`, `session_id`, `decision_id`, `control_id` | `decision`(`approve`/`reject`)、`option_id`、`reason`                                                                                              |
+| `user_input_response`    | `run_id`, `session_id`, `decision_id`, `control_id` | `answers`, `canceled`, `reason`                                                                                                                    |
+| `runtime_subscribe`      | `session_id`                                        | `cursor` `{epoch, seq}`                                                                                                                            |
+| `runtime_unsubscribe`    | `session_id`                                        | ——                                                                                                                                                 |
 
 三个 id 的语义（源码注释 `internal/handlers/local_channel.go:915-932`，值得原样搬到 iOS 注释里）：
 
@@ -188,8 +198,16 @@ runtime_snapshot / runtime_delta / runtime_dropped  ← 会话投影（订阅后
 `run_accepted` 结构（`internal/handlers/local_channel.go:1304-1315`）：
 
 ```json
-{ "type":"run_accepted", "run_id":"…", "invocation_id":"…", "session_id":"…",
-  "turn_id":"…", "epoch":"…", "seq":42, "duplicate":false }
+{
+  "type": "run_accepted",
+  "run_id": "…",
+  "invocation_id": "…",
+  "session_id": "…",
+  "turn_id": "…",
+  "epoch": "…",
+  "seq": 42,
+  "duplicate": false
+}
 ```
 
 #### ⚠️ 最关键的机制：发消息的连接收不到正文
@@ -262,13 +280,13 @@ admitting → running → waiting_decision → running → finishing → complet
 
 增量语义由 `internal/agent/runtime/session/state.go:13-47` 决定：
 
-| agent 事件 | 投影 |
-|---|---|
-| `text_delta` / `reasoning_delta` | `message_appends`（**按 id 追加内容**，不是整块替换） |
-| `tool_call_progress` | `progress_appends` |
-| `agent_end` / `agent_abort` / `error` | `message_upserts`（整块） |
-| `retry` | `reset_messages: true` |
-| 其余（含 `tool_call_start/end`、审批） | `message_upserts`（整块） |
+| agent 事件                             | 投影                                                  |
+| -------------------------------------- | ----------------------------------------------------- |
+| `text_delta` / `reasoning_delta`       | `message_appends`（**按 id 追加内容**，不是整块替换） |
+| `tool_call_progress`                   | `progress_appends`                                    |
+| `agent_end` / `agent_abort` / `error`  | `message_upserts`（整块）                             |
+| `retry`                                | `reset_messages: true`                                |
+| 其余（含 `tool_call_start/end`、审批） | `message_upserts`（整块）                             |
 
 **这是 iOS 渲染的核心性能契约**：流式文本走 append，`type` 只有 `text`/`reasoning`（`internal/agent/runtime/session/types.go:357-361` 的 `RuntimeMessageAppend`）。别把它当 upsert 处理，否则每帧重排整块。
 
@@ -346,7 +364,7 @@ App 通常**不需要**显式建会话：WS 发 `message` 时 `session_id` 留�
 `GET /bots/{bot_id}/messages?session_id=…&limit=…&before=…&before_message_id=…`（`internal/handlers/message.go:177-240`）
 
 ```json
-{ "items": [ /* UITurn[]，见 §5 */ ] }
+{ "items": [/* UITurn[]，见 §5 */] }
 ```
 
 - `limit` 默认 30，上限 100（`internal/handlers/message.go:168`、`:194-199`）。
@@ -378,14 +396,14 @@ App 通常**不需要**显式建会话：WS 发 `message` 时 `session_id` 留�
 
 `internal/handlers/session_queue.go:38-51` 注册了：
 
-| 端点 | 含义 |
-|---|---|
-| `GET /sessions/{id}/queue` | 一次拿全：`{steer_supported, steer:[…], follow_up:[…]}`（`:372-386`） |
-| `POST /sessions/{id}/steer-queue` | 把一段文字**插进正在跑的 run**，在下一个 step 边界生效 |
-| `POST /sessions/{id}/follow-up-queue` | 把一段文字排到**当前 run 结束后**作为新一轮 |
-| `POST /sessions/{id}/follow-up-queue/{item_id}/steer` | 把排队的 follow-up 提升为 steer |
-| `PATCH/DELETE .../{item_id}` | 编辑/取消 |
-| `PUT .../reorder` | 重排（body 是 `{item:{item_id}, before:{item_id}}`） |
+| 端点                                                  | 含义                                                                  |
+| ----------------------------------------------------- | --------------------------------------------------------------------- |
+| `GET /sessions/{id}/queue`                            | 一次拿全：`{steer_supported, steer:[…], follow_up:[…]}`（`:372-386`） |
+| `POST /sessions/{id}/steer-queue`                     | 把一段文字**插进正在跑的 run**，在下一个 step 边界生效                |
+| `POST /sessions/{id}/follow-up-queue`                 | 把一段文字排到**当前 run 结束后**作为新一轮                           |
+| `POST /sessions/{id}/follow-up-queue/{item_id}/steer` | 把排队的 follow-up 提升为 steer                                       |
+| `PATCH/DELETE .../{item_id}`                          | 编辑/取消                                                             |
+| `PUT .../reorder`                                     | 重排（body 是 `{item:{item_id}, before:{item_id}}`）                  |
 
 两者入参都是 `{invocation_id, text}`（`:53-56`），`invocation_id` 同样是幂等键。错误码映射在 `queueAdmissionError`（`:174-193`）：`queue_steer_unsupported`（该 run 不支持 steer）、`queue_no_active_run`、`queue_capacity_exceeded` 等。
 
@@ -412,15 +430,15 @@ UI 表达建议：`FollowUpItem.Status`（`internal/handlers/session_queue.go:67
   "input": { "command": "rm -rf build" },
   "running": false,
   "approval": {
-    "approval_id": "9f1c…",          // 提交决定时用这个
-    "short_id": 3,                    // 终端风格里给用户看的短号
-    "status": "pending",              // pending / approved / rejected / expired / …
+    "approval_id": "9f1c…", // 提交决定时用这个
+    "short_id": 3, // 终端风格里给用户看的短号
+    "status": "pending", // pending / approved / rejected / expired / …
     "decision_reason": "",
-    "can_approve": true,              // 服务端算好的"你现在能不能批"
+    "can_approve": true, // 服务端算好的"你现在能不能批"
     "options": [
-      { "id": "allow_once",   "name": "Allow once",    "kind": "allow_once" },
-      { "id": "allow_always", "name": "Always allow",  "kind": "allow_always" },
-      { "id": "reject_once",  "name": "Reject",        "kind": "reject_once" }
+      { "id": "allow_once", "name": "Allow once", "kind": "allow_once" },
+      { "id": "allow_always", "name": "Always allow", "kind": "allow_always" },
+      { "id": "reject_once", "name": "Reject", "kind": "reject_once" }
     ],
     "selected_option_id": ""
   }
@@ -431,15 +449,15 @@ UI 表达建议：`FollowUpItem.Status`（`internal/handlers/session_queue.go:67
 
 ### 4.2 App 需要展示/使用的字段
 
-| 字段 | 用途 |
-|---|---|
-| `name` + `input` | 用户真正要看的东西（要执行什么命令、改哪个文件） |
-| `approval.approval_id` | 提交决定的主键 |
-| `approval.options[]` | **一个 option 一个按钮**，按 `id` 回传。`kind` 是 `allow_once`/`allow_always`/`reject_once`/`reject_always`——iOS 可以直接用它选图标/文案（`apps/web/src/composables/api/useChat.types.ts:222-226` 的 TS 类型里带这四个枚举） |
-| `approval.status` | `pending` 才显示可操作按钮 |
-| `approval.can_approve` | 服务端权限判定，false 时按钮应禁用+给理由 |
-| `approval.selected_option_id` | 已选过的项，回显用 |
-| `approval.short_id` | 与终端输出对照（可选） |
+| 字段                          | 用途                                                                                                                                                                                                                         |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name` + `input`              | 用户真正要看的东西（要执行什么命令、改哪个文件）                                                                                                                                                                             |
+| `approval.approval_id`        | 提交决定的主键                                                                                                                                                                                                               |
+| `approval.options[]`          | **一个 option 一个按钮**，按 `id` 回传。`kind` 是 `allow_once`/`allow_always`/`reject_once`/`reject_always`——iOS 可以直接用它选图标/文案（`apps/web/src/composables/api/useChat.types.ts:222-226` 的 TS 类型里带这四个枚举） |
+| `approval.status`             | `pending` 才显示可操作按钮                                                                                                                                                                                                   |
+| `approval.can_approve`        | 服务端权限判定，false 时按钮应禁用+给理由                                                                                                                                                                                    |
+| `approval.selected_option_id` | 已选过的项，回显用                                                                                                                                                                                                           |
+| `approval.short_id`           | 与终端输出对照（可选）                                                                                                                                                                                                       |
 
 **`options` 是 agent 自己的权限选项，原样透传**（源码注释 `internal/agent/view/uimessage_stream.go:208-210`："没有它们，实时卡片只能给二元的答案，用户永远选不到 agent 的 session/always 作用域"）。**iOS 必须渲染 options，不要只做 approve/reject 两个按钮**——否则 ACP/Claude Code 那类需要选作用域的 agent 会卡住。
 
@@ -461,9 +479,15 @@ Body(可选): { "control_id": "…", "option_id": "allow_once", "reason": "" }
 **B. WebSocket**（与流在同一连接，推荐）
 
 ```json
-{ "type":"tool_approval_response", "run_id":"…", "session_id":"…",
-  "decision_id":"<approval_id>", "control_id":"<客户端生成 uuid>",
-  "decision":"approve", "option_id":"allow_once" }
+{
+  "type": "tool_approval_response",
+  "run_id": "…",
+  "session_id": "…",
+  "decision_id": "<approval_id>",
+  "control_id": "<客户端生成 uuid>",
+  "decision": "approve",
+  "option_id": "allow_once"
+}
 ```
 
 `decision_id` 就是 `approval_id`（`internal/handlers/local_channel.go:1917-1929` 显式 `ApprovalID: decisionID, ExplicitID: decisionID`）。
@@ -532,25 +556,39 @@ assistant turn：
 
 `internal/agent/view/uimessage.go:11-24` 定义了**只有 6 种** `type`：
 
-| type | 含义 | 关键字段 |
-|---|---|---|
-| `text` | 助手正文 | `content` |
-| `reasoning` | 思考过程 | `content`, `reasoning_timing.duration_ms` |
-| `tool` | 工具调用 | `name`, `input`, `output`, `tool_call_id`, `running`, `progress[]`, `approval`, `user_input`, `execution_location`, `background_task` |
-| `attachments` | 附件块 | `attachments[]` |
-| `error` | 错误 | `code`, `content`, `args` |
-| `notice` | 运行时降级提示 | `name`（机器码）, `content`（人话）, `args` |
+| type          | 含义           | 关键字段                                                                                                                              |
+| ------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `text`        | 助手正文       | `content`                                                                                                                             |
+| `reasoning`   | 思考过程       | `content`, `reasoning_timing.duration_ms`                                                                                             |
+| `tool`        | 工具调用       | `name`, `input`, `output`, `tool_call_id`, `running`, `progress[]`, `approval`, `user_input`, `execution_location`, `background_task` |
+| `attachments` | 附件块         | `attachments[]`                                                                                                                       |
+| `error`       | 错误           | `code`, `content`, `args`                                                                                                             |
+| `notice`      | 运行时降级提示 | `name`（机器码）, `content`（人话）, `args`                                                                                           |
 
 **注意没有"文件改动"专有 type。** 文件改动是通过 `tool` block 的 `execution_location` + `input`/`output` 表达的；图片/音视频走 `attachments`。如果设计稿里有"文件改动卡片"，它得从 tool 的 input/output 里推导，或者用 `notice` 的 `name` + `args`。
 
 共同字段（`internal/agent/view/uimessage.go:57-80`）：
 
 ```json
-{ "id": 3, "type": "text", "content": "…", "name": "", "input": null,
-  "output": null, "tool_call_id": "", "running": null, "progress": null,
-  "approval": null, "execution_location": null, "user_input": null,
-  "attachments": null, "background_task": null, "reasoning_timing": null,
-  "code": "", "args": null }
+{
+  "id": 3,
+  "type": "text",
+  "content": "…",
+  "name": "",
+  "input": null,
+  "output": null,
+  "tool_call_id": "",
+  "running": null,
+  "progress": null,
+  "approval": null,
+  "execution_location": null,
+  "user_input": null,
+  "attachments": null,
+  "background_task": null,
+  "reasoning_timing": null,
+  "code": "",
+  "args": null
+}
 ```
 
 **`id` 是 block 在一条 assistant turn 内的序号（int），不是全局 id。** 客户端按 `id` 排序和 upsert（源码注释 `internal/agent/view/uimessage_stream.go:338-345`）：工具块按 `tool_call_id` 匹配，text/reasoning 按位置匹配。
@@ -559,47 +597,81 @@ assistant turn：
 
 ```json
 {
-  "turn_id": "6b0f…", "turn_position": 18, "role": "assistant",
+  "turn_id": "6b0f…",
+  "turn_position": 18,
+  "role": "assistant",
   "timestamp": "2026-09-13T10:00:05Z",
   "messages": [
-    { "id": 0, "type": "reasoning",
+    {
+      "id": 0,
+      "type": "reasoning",
       "content": "用户想让我看 a.md，先读一下。",
-      "reasoning_timing": { "duration_ms": 1840 } },
+      "reasoning_timing": { "duration_ms": 1840 }
+    },
 
     { "id": 1, "type": "text", "content": "我先读一下这个文件。" },
 
-    { "id": 2, "type": "tool", "name": "Read", "tool_call_id": "toolu_01",
+    {
+      "id": 2,
+      "type": "tool",
+      "name": "Read",
+      "tool_call_id": "toolu_01",
       "input": { "path": "/workspace/a.md" },
       "output": { "content": "# 标题\n…" },
       "running": false,
-      "execution_location": { "kind": "workspace", "name": "primary" } },
+      "execution_location": { "kind": "workspace", "name": "primary" }
+    },
 
-    { "id": 3, "type": "tool", "name": "Bash", "tool_call_id": "toolu_02",
+    {
+      "id": 3,
+      "type": "tool",
+      "name": "Bash",
+      "tool_call_id": "toolu_02",
       "input": { "command": "git status" },
       "running": false,
       "approval": {
-        "approval_id": "3f9a…", "short_id": 4, "status": "pending",
+        "approval_id": "3f9a…",
+        "short_id": 4,
+        "status": "pending",
         "can_approve": true,
         "options": [
-          { "id":"allow_once",   "name":"Allow once",   "kind":"allow_once" },
-          { "id":"allow_always", "name":"Always allow", "kind":"allow_always" },
-          { "id":"reject_once",  "name":"Reject",       "kind":"reject_once" }
+          { "id": "allow_once", "name": "Allow once", "kind": "allow_once" },
+          { "id": "allow_always", "name": "Always allow", "kind": "allow_always" },
+          { "id": "reject_once", "name": "Reject", "kind": "reject_once" }
         ]
-      } },
+      }
+    },
 
-    { "id": 4, "type": "attachments",
+    {
+      "id": 4,
+      "type": "attachments",
       "attachments": [
-        { "type": "image", "name": "chart.png", "mime": "image/png",
-          "size": 20480, "content_hash": "sha256:…", "bot_id": "uuid" }
-      ] },
+        {
+          "type": "image",
+          "name": "chart.png",
+          "mime": "image/png",
+          "size": 20480,
+          "content_hash": "sha256:…",
+          "bot_id": "uuid"
+        }
+      ]
+    },
 
-    { "id": 5, "type": "notice", "name": "workspace_dependency_missing",
+    {
+      "id": 5,
+      "type": "notice",
+      "name": "workspace_dependency_missing",
       "content": "缺少依赖 ffmpeg，无法继续。",
-      "args": { "dep_id": "ffmpeg", "install_task_id": "…" } },
+      "args": { "dep_id": "ffmpeg", "install_task_id": "…" }
+    },
 
-    { "id": 6, "type": "error", "code": "provider_rate_limited",
+    {
+      "id": 6,
+      "type": "error",
+      "code": "provider_rate_limited",
       "content": "上游限流，请稍后重试。",
-      "args": { "retry_after_seconds": "30" } }
+      "args": { "retry_after_seconds": "30" }
+    }
   ]
 }
 ```
@@ -611,9 +683,20 @@ assistant turn：
 `UIAttachment`（`internal/agent/view/uimessage.go:26-40`）：
 
 ```json
-{ "id":"", "type":"image", "path":"", "url":"", "base64":"",
-  "name":"chart.png", "content_hash":"sha256:…", "bot_id":"uuid",
-  "mime":"image/png", "size":20480, "storage_key":"", "metadata":{} }
+{
+  "id": "",
+  "type": "image",
+  "path": "",
+  "url": "",
+  "base64": "",
+  "name": "chart.png",
+  "content_hash": "sha256:…",
+  "bot_id": "uuid",
+  "mime": "image/png",
+  "size": 20480,
+  "storage_key": "",
+  "metadata": {}
+}
 ```
 
 - `type` 归一化规则：显式 kind 优先，否则按 mime 前缀 → `image`/`audio`/`video`/`file`（`normalizeUIAttachmentType`，`internal/agent/view/uimessage.go:195-211`）。
@@ -633,24 +716,32 @@ assistant turn：
 
 路由：`internal/handlers/containerd.go:327-337`。全部需要 `workspace_read`（写操作需要 `workspace_write`），但 `fs/download` 对媒体路径降级为 guest 权限（`internal/handlers/filemanager.go:463-470`）。
 
-| 端点 | 方法 | 说明 |
-|---|---|---|
-| `/container/fs` | GET | stat；`?path=`，默认 `/` |
-| `/container/fs/list` | GET | 列目录 |
-| `/container/fs/read` | GET | **按文本读**，返回 JSON string |
-| `/container/fs/download` | GET | 二进制流；path 是目录则自动打 tar.gz |
-| `/container/fs/upload` | POST | multipart：`path` + `file` |
-| `/container/fs/write` | POST | 写文本，`expectedRevision` 做乐观锁 |
-| `/container/fs/{mkdir,delete,rename,archive,extract}` | POST | 常规操作 |
+| 端点                                                  | 方法 | 说明                                 |
+| ----------------------------------------------------- | ---- | ------------------------------------ |
+| `/container/fs`                                       | GET  | stat；`?path=`，默认 `/`             |
+| `/container/fs/list`                                  | GET  | 列目录                               |
+| `/container/fs/read`                                  | GET  | **按文本读**，返回 JSON string       |
+| `/container/fs/download`                              | GET  | 二进制流；path 是目录则自动打 tar.gz |
+| `/container/fs/upload`                                | POST | multipart：`path` + `file`           |
+| `/container/fs/write`                                 | POST | 写文本，`expectedRevision` 做乐观锁  |
+| `/container/fs/{mkdir,delete,rename,archive,extract}` | POST | 常规操作                             |
 
 ### 6.1 ⚠️ `fs/list` 的 JSON 是 camelCase
 
 ```json
-{ "path": "/workspace",
+{
+  "path": "/workspace",
   "entries": [
-    { "name": "a.md", "path": "/workspace/a.md", "size": 1024,
-      "mode": "-rw-r--r--", "modTime": "2026-09-13T10:00:00Z", "isDir": false }
-  ] }
+    {
+      "name": "a.md",
+      "path": "/workspace/a.md",
+      "size": 1024,
+      "mode": "-rw-r--r--",
+      "modTime": "2026-09-13T10:00:00Z",
+      "isDir": false
+    }
+  ]
+}
 ```
 
 （`FSFileInfo`，`internal/handlers/filemanager.go:28-35`）
@@ -662,7 +753,7 @@ assistant turn：
 ### 6.2 ⚠️ `fs/read` 的硬伤
 
 ```json
-{ "path":"/workspace/a.md", "content":"…", "size":1024, "revision":"sha256:…" }
+{ "path": "/workspace/a.md", "content": "…", "size": 1024, "revision": "sha256:…" }
 ```
 
 （`FSReadResponse`，`internal/handlers/filemanager.go:42-47`）
@@ -672,6 +763,7 @@ assistant turn：
 - 全局 `BodyLimit` 1M 只作用于 `/channels/*/webhook/*`（`internal/server/server.go:53-57` + `shouldLimitPublicRequestBody` `:155-157`），**护不到这里**。
 
 **iOS 侧纪律**：
+
 - `read` 只用于**文本且已知较小**的文件，先看 `list` 里的 `size` 再决定，超过阈值（建议 256KB–1MB）就别调。
 - 二进制一律走 `download`，且要能流式落盘（不要 `Data(contentsOf:)`）。
 - 大文本预览自己分页，不要依赖服务端。
@@ -755,11 +847,9 @@ default_image = "memohai/workspace:debian-latest"
 `apps/web/src/lib/api-client.ts:158-171`：
 
 ```ts
-const apiBaseUrl = options.baseUrl?.trim()
-  || import.meta.env.VITE_API_URL?.trim()
-  || '/api'                        // 默认
-const agentBaseUrl = import.meta.env.VITE_AGENT_URL?.trim() || '/agent'  // 声明了但未使用
-client.setConfig({ baseUrl: apiBaseUrl, fetch: createApiFetch(options.fetch) })
+const apiBaseUrl = options.baseUrl?.trim() || import.meta.env.VITE_API_URL?.trim() || '/api'; // 默认
+const agentBaseUrl = import.meta.env.VITE_AGENT_URL?.trim() || '/agent'; // 声明了但未使用
+client.setConfig({ baseUrl: apiBaseUrl, fetch: createApiFetch(options.fetch) });
 ```
 
 - 两个环境变量：**`VITE_API_URL`**（在使用）和 **`VITE_AGENT_URL`**（声明了但代码里 `void agentBaseUrl`，是死的）。
@@ -776,15 +866,15 @@ client.setConfig({ baseUrl: apiBaseUrl, fetch: createApiFetch(options.fetch) })
 
 ### 8.1 浏览器耦合的部分（iOS 必须绕开或替代）
 
-| 位置 | 耦合点 | iOS 对策 |
-|---|---|---|
-| WS 鉴权 | Web 用 `?token=`（`apps/web/src/lib/api-client.ts:18-26`） | 用 `Authorization` header，服务端原生支持（`internal/auth/jwt.go:37`） |
-| token 存储 | Web 用 `localStorage` + `window.location`（`api-client.ts:36-38`） | Keychain |
-| 所有 SSE | `sessions/events`、`web/stream` 靠 `EventSource`/`ReadableStream` | 只需实现 `sessions/events`；用 `URLSession` 的 bytes stream 或干脆轮询 REST 兜底 |
+| 位置                | 耦合点                                                                                                                                                         | iOS 对策                                                                                                                                                                                                                                                                                                           |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| WS 鉴权             | Web 用 `?token=`（`apps/web/src/lib/api-client.ts:18-26`）                                                                                                     | 用 `Authorization` header，服务端原生支持（`internal/auth/jwt.go:37`）                                                                                                                                                                                                                                             |
+| token 存储          | Web 用 `localStorage` + `window.location`（`api-client.ts:36-38`）                                                                                             | Keychain                                                                                                                                                                                                                                                                                                           |
+| 所有 SSE            | `sessions/events`、`web/stream` 靠 `EventSource`/`ReadableStream`                                                                                              | 只需实现 `sessions/events`；用 `URLSession` 的 bytes stream 或干脆轮询 REST 兜底                                                                                                                                                                                                                                   |
 | **WebRTC 桌面串流** | `POST /container/display/webrtc/offer`（`internal/handlers/display.go:135`），body `{type, sdp, session_id?, candidate_host?}`，返回 `{type, sdp, session_id}` | **协议本身是标准 SDP offer/answer，iOS 可以用 WebRTC.framework 接。** 但这是 P2P 到 bot 容器的方案，涉及 ICE/网络穿透，工程量大。**建议 MVP 直接砍掉**，只做"看状态"（`GET /container/display` 返回 `enabled/available/running/transport/encoder` 等，`displayInfoResponse` `internal/handlers/display.go:25-38`） |
-| 容器终端 | `GET /container/terminal/ws`（WebSocket） | 协议是 JSON 控制帧 + 数据帧（`internal/handlers/containerd_terminal.go:29-33`），**没有浏览器耦合**，iOS 可以接。但需要 `workspace_exec` 权限，30 分钟空闲超时（`:19-21`） |
-| CORS | `AllowOrigins: ["*"]`（`internal/server/server.go:58-63`） | 原生 App 无 CORS，忽略即可。**注意 `AllowHeaders` 白名单里没有自定义头**（只有 Origin/Content-Type/Accept/Authorization/X-Request-ID），所以别指望在 Web 上带自定义头 |
-| `/web/*` 命名 | `web` 是 channelType 的取值（`prefix = /bots/:bot_id/<channelType>`，`internal/handlers/local_channel.go:163-164`） | 名字里有 web，但**协议与浏览器无关**。别被名字误导 |
+| 容器终端            | `GET /container/terminal/ws`（WebSocket）                                                                                                                      | 协议是 JSON 控制帧 + 数据帧（`internal/handlers/containerd_terminal.go:29-33`），**没有浏览器耦合**，iOS 可以接。但需要 `workspace_exec` 权限，30 分钟空闲超时（`:19-21`）                                                                                                                                         |
+| CORS                | `AllowOrigins: ["*"]`（`internal/server/server.go:58-63`）                                                                                                     | 原生 App 无 CORS，忽略即可。**注意 `AllowHeaders` 白名单里没有自定义头**（只有 Origin/Content-Type/Accept/Authorization/X-Request-ID），所以别指望在 Web 上带自定义头                                                                                                                                              |
+| `/web/*` 命名       | `web` 是 channelType 的取值（`prefix = /bots/:bot_id/<channelType>`，`internal/handlers/local_channel.go:163-164`）                                            | 名字里有 web，但**协议与浏览器无关**。别被名字误导                                                                                                                                                                                                                                                                 |
 
 ### 8.2 速率限制
 
@@ -864,17 +954,17 @@ client.setConfig({ baseUrl: apiBaseUrl, fetch: createApiFetch(options.fetch) })
 
 ### 10.1 需求 → 接口对照
 
-| MVP 能力 | 接口 |
-|---|---|
-| 登录 | `POST /auth/login`（存 Keychain） |
-| bot 列表 | `GET /bots`（`internal/handlers/users.go:100`，响应 `{items:[Bot]}`，`internal/bots/types.go:9-27, 76-78`，含 `current_user_permissions` 用来做 UI 门控） |
-| 会话列表 | `GET /bots/{bot_id}/sessions` + SSE `/sessions/events` |
-| 历史消息 | `GET /bots/{bot_id}/messages?session_id=` |
-| 发消息 + 流式 | WS：`runtime_subscribe` → `message` |
-| 停止生成 | WS `abort`（需要 `run_id` + `control_id`） |
-| 工具批准 | WS `tool_approval_response`（或 REST approve/reject） |
-| token 用量 | `GET /bots/{bot_id}/token-usage?from=&to=`（**`from`/`to` 必填**，`YYYY-MM-DD`，`to` 排他；响应 `{chat, discuss, acp_agent, schedule, by_model}`，`internal/handlers/token_usage.go:61-68, 119-134`）+ `GET /bots/{bot_id}/token-usage/records` |
-| 工作区文件 | `GET /container/fs/list` / `fs/read` / `fs/download` |
+| MVP 能力      | 接口                                                                                                                                                                                                                                            |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 登录          | `POST /auth/login`（存 Keychain）                                                                                                                                                                                                               |
+| bot 列表      | `GET /bots`（`internal/handlers/users.go:100`，响应 `{items:[Bot]}`，`internal/bots/types.go:9-27, 76-78`，含 `current_user_permissions` 用来做 UI 门控）                                                                                       |
+| 会话列表      | `GET /bots/{bot_id}/sessions` + SSE `/sessions/events`                                                                                                                                                                                          |
+| 历史消息      | `GET /bots/{bot_id}/messages?session_id=`                                                                                                                                                                                                       |
+| 发消息 + 流式 | WS：`runtime_subscribe` → `message`                                                                                                                                                                                                             |
+| 停止生成      | WS `abort`（需要 `run_id` + `control_id`）                                                                                                                                                                                                      |
+| 工具批准      | WS `tool_approval_response`（或 REST approve/reject）                                                                                                                                                                                           |
+| token 用量    | `GET /bots/{bot_id}/token-usage?from=&to=`（**`from`/`to` 必填**，`YYYY-MM-DD`，`to` 排他；响应 `{chat, discuss, acp_agent, schedule, by_model}`，`internal/handlers/token_usage.go:61-68, 119-134`）+ `GET /bots/{bot_id}/token-usage/records` |
+| 工作区文件    | `GET /container/fs/list` / `fs/read` / `fs/download`                                                                                                                                                                                            |
 
 `GET /bots` 的权限模型：非 admin 只能看到自己可访问的 bot（`ListAccessible`，`internal/handlers/users.go:679-686`），`owner_id` 过滤要 admin。
 

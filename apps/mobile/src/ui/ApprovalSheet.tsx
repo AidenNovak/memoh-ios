@@ -51,13 +51,19 @@ export function ApprovalSheet({
             },
           ]}
         >
-          <Text style={[typography.title3, { color: palette.label, paddingHorizontal: spacing.lg }]}>
+          <Text
+            style={[typography.title3, { color: palette.label, paddingHorizontal: spacing.lg }]}
+          >
             {t('approval.title')}
           </Text>
           <Text
             style={[
               typography.subhead,
-              { color: palette.secondaryLabel, paddingHorizontal: spacing.lg, marginTop: spacing.xs },
+              {
+                color: palette.secondaryLabel,
+                paddingHorizontal: spacing.lg,
+                marginTop: spacing.xs,
+              },
             ]}
           >
             {t('approval.subtitle')}
@@ -106,7 +112,8 @@ function ChoiceButton({ choice, onPress }: { choice: ApprovalChoice; onPress: ()
   const t = useT();
 
   // agent 给了名字就用它的；没有就用本地化兜底文案（按语气选）。
-  const label = choice.label !== undefined && choice.label !== '' ? choice.label : t(fallbackLabelKey(choice));
+  const label =
+    choice.label !== undefined && choice.label !== '' ? choice.label : t(fallbackLabelKey(choice));
 
   const tone =
     choice.tone === 'allow'
