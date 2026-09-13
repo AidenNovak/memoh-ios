@@ -15,8 +15,10 @@ export {
   dropOptimistic,
   initialChatState,
   isFallbackOption,
+  isRunAbandoned,
   markStale,
   resetLive,
+  settleAbandonedRun,
   turnsForDisplay,
   type ChatState,
 } from '../chat/reducer.ts';

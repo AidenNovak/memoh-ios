@@ -12,6 +12,8 @@ import { test } from 'node:test';
 import {
   decisionForFallback,
   isFallbackOption,
+  isRunAbandoned,
+  settleAbandonedRun,
   applyDelta,
   applyHistory,
   applySnapshot,
@@ -527,6 +529,100 @@ test('刷新历史后不会出现重复轮次（回归）', () => {
   assert.equal(assistantLines.length, 1, '助手输出只能出现一次');
   assert.equal(state.optimistic.length, 0);
   assert.deepEqual(state.order, []);
+});
+
+test('租约过期时判定 owner 已消失（回归：曾永远转圈）', () => {
+  // 实测（tools/orphan-run-probe.mjs）：run 正常失败时投影会给 errored，
+  // 但 owner 进程死掉时投影永远停在 running——不报错、不收敛、也不再有任何帧。
+  // 没有这个判断，界面就是一直转圈，用户只能杀进程且不知道为什么。
+  const NOW = Date.parse('2026-09-13T18:00:00Z');
+  const state = applySnapshot(initialChatState, {
+    bot_id: 'b1',
+    session_id: 's1',
+    epoch: 'e1',
+    seq: 1,
+    current_run_view: {
+      run_id: 'r1',
+      status: 'running',
+      messages: [],
+      // 租约已经过去了
+      owner_lease_expires_at: '2026-09-13T17:59:00Z',
+    },
+  });
+
+  assert.equal(state.running, true, '收到时确实在跑');
+  assert.equal(state.runLeaseExpiresAt, '2026-09-13T17:59:00Z', '租约时间要存下来');
+  assert.equal(isRunAbandoned(state, NOW), true, '租约过期 = owner 已消失');
+});
+
+test('租约没过期时不算消失（不能误伤正常的长任务）', () => {
+  const NOW = Date.parse('2026-09-13T18:00:00Z');
+  const state = applySnapshot(initialChatState, {
+    bot_id: 'b1',
+    session_id: 's1',
+    epoch: 'e1',
+    seq: 1,
+    current_run_view: {
+      run_id: 'r1',
+      status: 'running',
+      messages: [],
+      owner_lease_expires_at: '2026-09-13T18:10:00Z',
+    },
+  });
+
+  assert.equal(isRunAbandoned(state, NOW), false, '长任务不能因为等得久就被判死');
+});
+
+test('没有租约信息时不猜（宁可转圈也不要误报失败）', () => {
+  // 误报失败比多等一会儿更糟：用户会以为任务丢了，可能重复发起。
+  const state = applyDelta(initialChatState, 'e1', 1, {
+    run: { run_id: 'r1', status: 'running' },
+  });
+
+  assert.equal(state.runLeaseExpiresAt, null);
+  assert.equal(isRunAbandoned(state, Date.now()), false);
+});
+
+test('settleAbandonedRun 把消失的 run 落成可读的失败态', () => {
+  const NOW = Date.parse('2026-09-13T18:00:00Z');
+  let state = applySnapshot(initialChatState, {
+    bot_id: 'b1',
+    session_id: 's1',
+    epoch: 'e1',
+    seq: 1,
+    current_run_view: {
+      run_id: 'r1',
+      status: 'running',
+      messages: [],
+      owner_lease_expires_at: '2026-09-13T17:59:00Z',
+    },
+  });
+
+  state = settleAbandonedRun(state, NOW);
+
+  assert.equal(state.running, false, '界面要停止转圈');
+  assert.equal(state.runStatus, 'errored', '落成失败态（界面据此显示错误条）');
+  assert.equal(state.runError, 'error.runAbandoned');
+});
+
+test('还没过期的 run 不会被 settle 掉', () => {
+  const NOW = Date.parse('2026-09-13T18:00:00Z');
+  let state = applySnapshot(initialChatState, {
+    bot_id: 'b1',
+    session_id: 's1',
+    epoch: 'e1',
+    seq: 1,
+    current_run_view: {
+      run_id: 'r1',
+      status: 'running',
+      messages: [],
+      owner_lease_expires_at: '2026-09-13T18:30:00Z',
+    },
+  });
+
+  const after = settleAbandonedRun(state, NOW);
+  assert.equal(after.running, true, '正常跑着的 run 不能被误伤');
+  assert.equal(after, state, '没有变化时应该原样返回（避免多余渲染）');
 });
 
 test('hasContent 过滤空轮次', () => {

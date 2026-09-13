@@ -162,3 +162,42 @@ pnpm verify:simulator --name 'chat roundtrip' -- zsh -euc '
 - `config.toml` 里的 admin 密码是脚本生成的随机值，但**没有配 HTTPS**，隧道里走的是明文 HTTP；
 - 没有配邮件、没有配 webhook 隧道、没有开连接器 profile；
 - 资源上限是按"与生产共存"设的，不是按实际负载调的。
+
+## 真实 API 场景测试
+
+除了"链路通不通"，还要验证**不同模型家族的真实行为差异**——思考块的有无、增量粒度、
+工具调用方式、错误码形态。这些只有真打过才知道，而任何一条处理不好，用户看到的就是
+"卡住"或"内容丢了"。
+
+```bash
+# 跨模型家族的对话行为（思考块、增量粒度、错误态）
+node tools/api-scenarios.mjs
+node tools/api-scenarios.mjs --scenario tools     # 只测工具调用
+node tools/api-scenarios.mjs --list
+
+# 同一个提示打不同模型，分辨"模型不用工具"和"工具链路坏了"
+node tools/tool-compare.mjs
+
+# 审批链路（会临时打开审批、造场景、验证、然后恢复原设置）
+node tools/approval-flow.mjs
+
+# 单模型稳定性（排除偶发）
+node tools/k3-stability.mjs 4
+```
+
+### 加一个模型提供商
+
+dev 环境里目前有两个家族（DeepSeek 走模板、Kimi 走自定义端点）。再加一个：
+
+```bash
+# spec 从 stdin 传，key 不出现在命令行与历史里
+ssh vultr-sg "MEMOH_PROVIDER_SPEC=\"\$(cat)\" python3 /opt/memoh-dev/ops/add-provider.py" < spec.json
+```
+
+spec 形状见 `infra/vultr-sg/add-provider.py` 开头。脚本幂等，且**每次都会把
+base_url / api_key 更新一遍**——否则复用旧 provider 时会用着上一次的凭据还以为没问题。
+
+两个坑（脚本已处理，但知道有好处）：
+
+- 新建的模型默认 `enable=false`，不显式启用的话 run 会说"chat model is disabled"；
+- 那个错误看起来像"模型不可用"，实际是"配置没生效"。

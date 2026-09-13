@@ -30,6 +30,8 @@ import { canOpenRealtime, type Bot, type Session as MemohSession } from '../../a
 import {
   decisionForFallback,
   isFallbackOption,
+  isRunAbandoned,
+  settleAbandonedRun,
   appendOptimisticUserMessage,
   applyDelta,
   applyHistory,
@@ -355,6 +357,27 @@ export function SessionProvider({
     void refreshHistory(currentSessionId);
     realtimeRef.current?.subscribe(currentSessionId);
   }, [state.client, state.currentSessionId, refreshHistory, ensureSessionInList]);
+
+  /**
+   * 兜住"owner 已经死了但投影还停在 running"的情况。
+   *
+   * 实测（`tools/orphan-run-probe.mjs`）：run 正常失败时投影会给 `errored`，
+   * 但 owner 进程死掉时投影永远停在 `running`——不报错、不收敛。这时**服务端给的
+   * 租约到期时间**是唯一线索。
+   *
+   * 没有这个检查，界面就是一直转圈，用户只能杀进程。
+   */
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const sessionId = stateRef.current.currentSessionId;
+      if (sessionId === null) return;
+      const chat = stateRef.current.chats[sessionId];
+      if (chat === undefined) return;
+      if (!isRunAbandoned(chat)) return;
+      dispatch({ type: 'chat', sessionId, update: (current) => settleAbandonedRun(current) });
+    }, 15_000);
+    return () => clearInterval(timer);
+  }, []);
 
   // run 从跑着变成结束 → 历史现在是权威的，拉一次覆盖本地推测。
   useEffect(() => {

@@ -159,7 +159,8 @@ export function ChatScreen() {
           </Text>
           {chat.runError !== null ? (
             <Text style={[typography.footnote, { color: palette.secondaryLabel, marginTop: 2 }]}>
-              {chat.runError}
+              {/* 我们自己的错误用 i18n key；服务端给的是已经本地化过的文案，原样显示。 */}
+              {chat.runError.startsWith('error.') ? t(chat.runError) : chat.runError}
             </Text>
           ) : null}
         </View>

@@ -52,6 +52,13 @@ export interface ChatState {
   runId: string | null;
   runStatus: RunStatus | null;
   runError: string | null;
+  /**
+   * owner 的租约到期时间（ISO 字符串）。
+   *
+   * 用来识别"owner 已经死了但投影还停在 running"——那是用户唯一能看到的线索，
+   * 没有它界面就永远转圈。见 `tools/orphan-run-probe.mjs`。
+   */
+  runLeaseExpiresAt: string | null;
   /** 服务端权威：是否有活跃 run。 */
   running: boolean;
   /** 活跃 run 已准入的用户输入（含 apply 过的 steer）。 */
@@ -82,6 +89,7 @@ export const initialChatState: ChatState = {
   runId: null,
   runStatus: null,
   runError: null,
+  runLeaseExpiresAt: null,
   running: false,
   liveUserTurns: [],
   blocks: {},
@@ -457,6 +465,7 @@ export function applySnapshot(state: ChatState, payload: RuntimeSnapshotPayload)
     runId: run?.run_id ?? null,
     runStatus: run?.status ?? null,
     runError: typeof run?.error === 'string' && run.error !== '' ? run.error : null,
+    runLeaseExpiresAt: run?.owner_lease_expires_at ?? null,
     running: isRunActive(run?.status),
     liveUserTurns: run?.user_turns ?? [],
     blocks,
@@ -547,6 +556,7 @@ export function applyDelta(
       runId: run.run_id ?? next.runId,
       runStatus: run.status ?? next.runStatus,
       runError: run.error ?? null,
+      runLeaseExpiresAt: run.owner_lease_expires_at ?? next.runLeaseExpiresAt,
       running: isRunActive(run.status),
     };
   }
@@ -628,6 +638,46 @@ export function clearUserInput(state: ChatState): ChatState {
 
 export function markStale(state: ChatState, stale: boolean): ChatState {
   return { ...state, stale };
+}
+
+/**
+ * owner 的租约是否已过期——也就是"这个 run 已经没人管了"。
+ *
+ * ## 为什么必须有这个判断
+ *
+ * 实测（`tools/orphan-run-probe.mjs`）：run **正常失败**时投影会给出 `errored`，
+ * 重订阅也能拿到终态。但 owner 进程死掉时（上游偶发，见
+ * `docs/research/verified-behaviour.md`），投影会**永远停在 `running`**：
+ * 不报错、不收敛、也不再有任何帧。
+ *
+ * 没有这个判断，界面就是永远转圈——用户唯一的出路是杀进程，而且不知道原因。
+ * 租约是服务端给的（`owner_lease_expires_at`），所以这个判断不依赖我们猜。
+ *
+ * @param now 当前时间，便于测试注入。
+ */
+export function isRunAbandoned(state: ChatState, now: number = Date.now()): boolean {
+  if (!state.running) return false;
+  if (state.runLeaseExpiresAt === null) return false;
+  const expiry = Date.parse(state.runLeaseExpiresAt);
+  if (Number.isNaN(expiry)) return false;
+  return expiry < now;
+}
+
+/**
+ * 把"owner 已消失"落成终态。
+ *
+ * 状态变成 `errored` 并附可读原因，界面就能显示失败、用户就能重试或继续输入——
+ * 而不是对着一个转不完的圈。之后如果服务端补发了真实终态帧，`applyDelta` 会照常
+ * 覆盖它（那时以服务端为准）。
+ */
+export function settleAbandonedRun(state: ChatState, now: number = Date.now()): ChatState {
+  if (!isRunAbandoned(state, now)) return state;
+  return {
+    ...state,
+    running: false,
+    runStatus: 'errored',
+    runError: 'error.runAbandoned',
+  };
 }
 
 /** 重连/切换会话时重置实时部分，保留历史。 */

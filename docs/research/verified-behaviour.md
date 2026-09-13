@@ -136,3 +136,98 @@ ERROR: resolve: chat model deepseek-v4-flash is disabled
 1. 写一个能独立跑的小探针放 `tools/`（用 `tools/` 下的既有脚本当模板）。
 2. 跑它，把**原始输出**贴进来——不要转述，转述会丢掉边界情况。
 3. 写清"这改变了哪里的做法"。没有落到代码上的结论，下一轮就会忘。
+
+## 10. 审批的 `options` 可能整个缺失
+
+**探针**：`tools/approval-shape.mjs`
+
+打开审批后，服务端返回的 approval 原始形状：
+
+```json
+{
+  "approval_id": "38f27df8-3f1c-4e98-ac22-c5b26632aea1",
+  "short_id": 1,
+  "status": "pending",
+  "can_approve": true
+}
+```
+
+**没有 `options` 字段**——不是空数组，是根本不存在。
+
+**含义（这条最要紧）**：客户端必须回退到"批准 / 拒绝"两个动作，否则界面上是一个
+**没有按钮的审批框**，而 run 永远停在 `waiting_decision`。用户看到的是"卡住了"，
+而且完全不知道为什么。
+
+回退时**不能回传伪造的 option_id**——服务端匹配不到。用 `decision: 'approve' | 'reject'`。
+官方 Web 客户端的回退逻辑在 `apps/web/src/components/tool-approval-actions.vue`：
+没有 agentOptions 时给 `binary:approve` / `binary:reject` 两个动作。
+
+## 11. 审批默认是关的
+
+`bot.settings.tool_approval_config.enabled` 默认 `false`，且 `write.require_approval`
+默认 `true` 但 `bypass_globs` 含 `/data/**` 与 `/tmp/**`（工作区路径基本都被豁免）。
+
+**含义**：任何"顺畅对话"测试都覆盖不到审批路径。要测就必须显式打开，并且用
+`force_review_commands` 把命令列进去——只设 `require_approval: true` 时，
+"简单可执行文件 + 无危险特征"的命令仍可能被放行（判定顺序见
+`internal/agent/decision/approval/policy.go`）。
+
+**注意**：`PUT /bots/{id}/settings` 的 `tool_approval_config` 形状必须与 GET 返回的
+完全一致（**没有 `mode` 字段**）。多传字段会让整个 PUT 被拒，而失败信息不明显——
+看起来像"设置没生效"。
+
+## 12. 模型之间在"是否真的用工具"上差异很大
+
+**探针**：`tools/tool-compare.mjs`
+
+同一个 bot、同一句提示（"用你的 shell 工具跑 echo …"）：
+
+| 模型              | 结果                                    |
+| ----------------- | --------------------------------------- |
+| k3                | 走工具通道，真的执行了 `exec`，拿到输出 |
+| deepseek-v4-flash | 回复"这个会话里没有暴露 shell/执行工具" |
+
+**含义**：测工具链路必须挑对模型，否则测的是"这个模型不用工具"而不是"工具链路坏了"。
+k3 也偶发把工具调用当**文本**吐出来（`<tool_calls><invoke name="Bash">…`），这时
+正文里会出现看起来像 XML 的内容——但那不是工具调用，客户端不应该去解析它。
+
+## 13. 上游偶发：`persistence fence is stale`
+
+**现象**：k3 偶尔在 `admitting` 之后失败，服务端日志：
+
+```
+level=ERROR msg="agent stream error" error="twilightai: commit step 0: session runtime persistence fence is stale"
+```
+
+run 落盘为 `state=failed, error_code=agent.response_interrupted`；客户端侧表现为
+"收到 run_accepted，然后 3 帧之后没下文"。
+
+**排查过程**（都做过，都没能稳定复现）：
+
+- 单独跑 k3：4/4 通过
+- 换时序（订阅后 1.2s vs 4s 再发）：都通过
+- 并发两个会话同时跑：都通过
+- 但服务端日志在并发那次仍出现了一次该错误
+
+**判定**：上游偶发，与客户端无关。`internal/runtimefence/fence.go` 的注释说明
+"a newer run increments Token and permanently invalidates older fences"——`agent`
+技能也会触发同一条路径。
+
+**对客户端的要求**：不能假设 run 一定会到 `completed`。要能显示"运行失败"并允许重试。
+测试里把这种情况与"真卡住"分开报（见 `tools/api-scenarios.mjs` 的 `classify()`），
+否则偶发会淹掉真信号。
+
+## 14. Web 端把 `settings` 的写入形状定义得很死
+
+`PUT /bots/{id}/settings` 只接受与 GET 完全一致的字段集。传入多余字段（例如给
+`read`/`write`/`exec` 加一个 GET 里没有的 `mode`）会让整个请求被拒，而**响应仍是 200**
+且返回当前的（未改变的）配置。
+
+**含义**：这类"200 但没生效"是最难查的一类。写 settings 的代码必须：
+
+1. 先 GET 拿到当前形状；
+2. 只改要改的字段；
+3. 写完再 GET 一次确认。
+
+`tools/approval-flow.mjs` 就是这么做的，并且会在结束时**恢复原设置**——
+留下一个"每个工具都要审批"的配置会让其他验收莫名卡住。

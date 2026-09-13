@@ -242,6 +242,17 @@ export interface CurrentRunView {
   generation?: string;
   status: RunStatus;
   owner_id?: string;
+  /**
+   * owner 的租约到期时间。
+   *
+   * ⚠️ 这是客户端判断"这个 run 是不是已经没人管了"的**唯一依据**。
+   *
+   * 实测（`tools/orphan-run-probe.mjs`）：run 正常失败时投影会给出 `errored`，
+   * 重订阅也能拿到终态。但 owner 进程死掉（例如上游的 persistence fence 失效）时，
+   * 投影会**永远停在 `running`**——不会报错、不会收敛。这时租约过期是唯一线索。
+   *
+   * 没有它，客户端的表现就是"永远在转圈"，用户只能杀进程。
+   */
   owner_lease_expires_at?: string;
   started_at?: string;
   updated_at?: string;
