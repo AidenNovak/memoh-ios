@@ -10,6 +10,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+  decisionForFallback,
+  isFallbackOption,
   applyDelta,
   applyHistory,
   applySnapshot,
@@ -195,6 +197,75 @@ test('审批从整块内容里提取，选项逐字保留', () => {
   assert.deepEqual(
     state.approval.options.map((option) => option.tone),
     ['allow', 'allow', 'reject'],
+  );
+});
+
+test('agent 没给 options 时回退到批准/拒绝（回归：曾渲染出没有按钮的审批框）', () => {
+  // 实测（tools/approval-shape.mjs）：agent 不定义权限选项时，服务端返回的
+  // approval 只有 {approval_id, short_id, status, can_approve}，**没有 options**。
+  // 早期实现给了一个空数组，界面上就是"一个没有任何按钮的审批框"，
+  // 而 run 永远停在 waiting_decision，用户完全不知道为什么不动了。
+  const state = applyDelta(initialChatState, 'e1', 1, {
+    message_upserts: [
+      {
+        id: 1,
+        type: 'tool',
+        name: 'exec',
+        running: false,
+        input: { command: 'rm -rf /tmp/x' },
+        approval: { approval_id: 'a1', short_id: 1, status: 'pending', can_approve: true },
+      },
+    ],
+  });
+
+  assert.notEqual(state.approval, null, '审批应该被识别出来');
+  assert.equal(state.approval.options.length, 2, '必须有两个可点的动作');
+  assert.deepEqual(
+    state.approval.options.map((option) => option.tone),
+    ['allow', 'reject'],
+  );
+});
+
+test('兜底动作的 id 是我们造的，不能当 option_id 回传', () => {
+  // 把假 id 回传给服务端会让它匹配不到，审批永远处理不掉。
+  assert.equal(isFallbackOption('__fallback_approve__'), true);
+  assert.equal(isFallbackOption('__fallback_reject__'), true);
+  assert.equal(isFallbackOption('allow_once'), false);
+  assert.equal(decisionForFallback('__fallback_approve__'), 'approve');
+  assert.equal(decisionForFallback('__fallback_reject__'), 'reject');
+});
+
+test('agent 给了 options 时用它的，不混入兜底', () => {
+  const state = applyDelta(initialChatState, 'e1', 1, {
+    message_upserts: [
+      {
+        id: 1,
+        type: 'tool',
+        name: 'fs_write',
+        running: false,
+        approval: {
+          approval_id: 'a2',
+          status: 'pending',
+          can_approve: true,
+          options: [
+            { id: 'allow_once', kind: 'allow_once' },
+            { id: 'allow_always', kind: 'allow_always' },
+            { id: 'reject_once', kind: 'reject_once' },
+          ],
+        },
+      },
+    ],
+  });
+
+  assert.equal(state.approval.options.length, 3);
+  assert.deepEqual(
+    state.approval.options.map((option) => option.id),
+    ['allow_once', 'allow_always', 'reject_once'],
+  );
+  assert.equal(
+    state.approval.options.some((option) => isFallbackOption(option.id)),
+    false,
+    'agent 给了选项就不该出现兜底动作',
   );
 });
 

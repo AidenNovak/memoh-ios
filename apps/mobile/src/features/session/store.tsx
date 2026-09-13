@@ -28,6 +28,8 @@ import { ApiError, MemohClient } from '../../api/client.ts';
 import { MemohRealtime, type ConnectionState } from '../../api/realtime.ts';
 import { canOpenRealtime, type Bot, type Session as MemohSession } from '../../api/types.ts';
 import {
+  decisionForFallback,
+  isFallbackOption,
   appendOptimisticUserMessage,
   applyDelta,
   applyHistory,
@@ -416,12 +418,24 @@ export function SessionProvider({
     const approval = chat?.approval;
     const runId = chat?.runId;
     if (approval == null || runId == null) return;
-    realtime.respondToApproval({
-      sessionId: currentSessionId,
-      runId,
-      approvalId: approval.approvalId,
-      optionId,
-    });
+
+    // 兜底动作不是 agent 定义的选项，不能把它的假 id 回传——服务端匹配不到。
+    // 这时用 decision 表达批准/拒绝。
+    if (isFallbackOption(optionId)) {
+      realtime.respondToApproval({
+        sessionId: currentSessionId,
+        runId,
+        approvalId: approval.approvalId,
+        decision: decisionForFallback(optionId),
+      });
+    } else {
+      realtime.respondToApproval({
+        sessionId: currentSessionId,
+        runId,
+        approvalId: approval.approvalId,
+        optionId,
+      });
+    }
     dispatch({ type: 'chat', sessionId: currentSessionId, update: clearApproval });
   }, []);
 

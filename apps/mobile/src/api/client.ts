@@ -11,6 +11,7 @@
  */
 import type {
   Account,
+  ModelSummary,
   Session,
   ListBotsResponse,
   ListSessionsResponse,
@@ -96,9 +97,28 @@ export class MemohClient {
   }
 
   /**
+   * 打任意端点。给工具脚本与尚未成型的接口用。
+   *
+   * 有语义的接口都应该在上面有具名方法——`request` 是逃生舱，不是主路。
+   * 用它的时候顺手想一下"这个是不是该有个具名方法"。
+   */
+  request<T = Record<string, unknown>>(method: string, path: string, body?: unknown): Promise<T> {
+    return this.send<T>(method, path, { body });
+  }
+
+  /** GET /bots/{botId}/settings —— bot 的运行时配置（模型、审批策略等）。 */
+  getSettings(botId: string): Promise<Record<string, unknown>> {
+    return this.send<Record<string, unknown>>('GET', `/bots/${botId}/settings`);
+  }
+
+  updateSettings(botId: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.send<Record<string, unknown>>('PUT', `/bots/${botId}/settings`, { body });
+  }
+
+  /**
    * `authenticated: false` 只给 `/auth/login` 用——那是唯一公开的鉴权入口。
    */
-  private async request<T>(
+  private async send<T>(
     method: string,
     path: string,
     options: {
@@ -150,7 +170,7 @@ export class MemohClient {
 
   /** 唯一公开入口。成功后应把返回的 profile 落盘（refresh 不再返回这些字段）。 */
   login(username: string, password: string): Promise<LoginResponse> {
-    return this.request<LoginResponse>('POST', '/auth/login', {
+    return this.send<LoginResponse>('POST', '/auth/login', {
       body: { username, password },
       authenticated: false,
     });
@@ -158,17 +178,17 @@ export class MemohClient {
 
   /** 需要当前 token 仍然有效。过期就救不回来了。 */
   refresh(): Promise<RefreshResponse> {
-    return this.request<RefreshResponse>('POST', '/auth/refresh');
+    return this.send<RefreshResponse>('POST', '/auth/refresh');
   }
 
   me(): Promise<Account> {
-    return this.request<Account>('GET', '/users/me');
+    return this.send<Account>('GET', '/users/me');
   }
 
   // -------------------------------------------------------------- Bot
 
   listBots(): Promise<ListBotsResponse> {
-    return this.request<ListBotsResponse>('GET', '/bots');
+    return this.send<ListBotsResponse>('GET', '/bots');
   }
 
   // -------------------------------------------------------------- 会话
@@ -177,7 +197,7 @@ export class MemohClient {
     botId: string,
     options: { limit?: number; cursor?: string } = {},
   ): Promise<ListSessionsResponse> {
-    return this.request<ListSessionsResponse>('GET', `/bots/${botId}/sessions`, {
+    return this.send<ListSessionsResponse>('GET', `/bots/${botId}/sessions`, {
       query: { limit: options.limit, cursor: options.cursor },
     });
   }
@@ -190,19 +210,26 @@ export class MemohClient {
    * 标题就退化成占位文案，用户看不出自己在哪个会话里。
    */
   getSession(botId: string, sessionId: string): Promise<Session> {
-    return this.request<Session>('GET', `/bots/${botId}/sessions/${sessionId}`);
+    return this.send<Session>('GET', `/bots/${botId}/sessions/${sessionId}`);
+  }
+
+  /**
+   * 列模型。用于「这个 bot 能用哪些模型」以及测试跨模型家族的行为差异。
+   */
+  listModels(): Promise<{ items?: ModelSummary[] } | ModelSummary[]> {
+    return this.send<{ items?: ModelSummary[] } | ModelSummary[]>('GET', '/models');
   }
 
   createSession(botId: string, body: Record<string, unknown>): Promise<unknown> {
-    return this.request<unknown>('POST', `/bots/${botId}/sessions`, { body });
+    return this.send<unknown>('POST', `/bots/${botId}/sessions`, { body });
   }
 
   updateSession(botId: string, sessionId: string, body: Record<string, unknown>): Promise<unknown> {
-    return this.request<unknown>('PATCH', `/bots/${botId}/sessions/${sessionId}`, { body });
+    return this.send<unknown>('PATCH', `/bots/${botId}/sessions/${sessionId}`, { body });
   }
 
   deleteSession(botId: string, sessionId: string): Promise<void> {
-    return this.request<void>('DELETE', `/bots/${botId}/sessions/${sessionId}`);
+    return this.send<void>('DELETE', `/bots/${botId}/sessions/${sessionId}`);
   }
 
   /**
@@ -214,7 +241,7 @@ export class MemohClient {
     sessionId: string,
     options: { limit?: number; beforeMessageId?: string | number } = {},
   ): Promise<UIMessageListResponse> {
-    return this.request<UIMessageListResponse>('GET', `/bots/${botId}/messages`, {
+    return this.send<UIMessageListResponse>('GET', `/bots/${botId}/messages`, {
       query: {
         session_id: sessionId,
         limit: options.limit,
@@ -225,30 +252,27 @@ export class MemohClient {
 
   /** 会话上下文用量 / 缓存命中 / 技能列表。**不是**运行状态。 */
   sessionStatus(botId: string, sessionId: string): Promise<Record<string, unknown>> {
-    return this.request<Record<string, unknown>>(
-      'GET',
-      `/bots/${botId}/sessions/${sessionId}/status`,
-    );
+    return this.send<Record<string, unknown>>('GET', `/bots/${botId}/sessions/${sessionId}/status`);
   }
 
   // -------------------------------------------------------------- 用量
 
   tokenUsage(botId: string): Promise<Record<string, unknown>> {
-    return this.request<Record<string, unknown>>('GET', `/bots/${botId}/token-usage`);
+    return this.send<Record<string, unknown>>('GET', `/bots/${botId}/token-usage`);
   }
 
   // -------------------------------------------------------------- 工作区文件
 
   /** ⚠️ 这个端点的 JSON 是 camelCase（`modTime` / `isDir`），全仓唯一例外。 */
   listFiles(botId: string, path: string): Promise<Record<string, unknown>> {
-    return this.request<Record<string, unknown>>('GET', `/bots/${botId}/container/fs/list`, {
+    return this.send<Record<string, unknown>>('GET', `/bots/${botId}/container/fs/list`, {
       query: { path },
     });
   }
 
   /** ⚠️ 无大小限制，且二进制会有损。只用于小文本预览。 */
   readFile(botId: string, path: string): Promise<Record<string, unknown>> {
-    return this.request<Record<string, unknown>>('GET', `/bots/${botId}/container/fs/read`, {
+    return this.send<Record<string, unknown>>('GET', `/bots/${botId}/container/fs/read`, {
       query: { path },
     });
   }

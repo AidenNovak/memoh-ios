@@ -264,6 +264,35 @@ function isPending(status: string | undefined): boolean {
   return status === 'pending' || status === 'waiting';
 }
 
+/**
+ * 审批的兜底选项。
+ *
+ * ⚠️ 服务端**不保证**给 `options`。实测（`tools/approval-shape.mjs`）：当 agent 没有
+ * 定义权限选项时，approval 里只有 `{approval_id, short_id, status, can_approve}`——
+ * 没有 options。
+ *
+ * 这时必须给出"批准 / 拒绝"两个动作，否则界面上是一个**没有按钮的审批框**，
+ * run 永远停在 `waiting_decision`，用户完全不知道为什么不动了。
+ * 官方 Web 客户端也是这个回退逻辑（`tool-approval-actions.vue`）。
+ *
+ * ⚠️ 兜底动作**不带 option_id**：带一个 agent 没定义过的 id 会让服务端无法匹配，
+ * 决策由 `decision: 'approve' | 'reject'` 表达。
+ */
+export const FALLBACK_APPROVAL_OPTIONS: ApprovalChoice[] = [
+  { id: '__fallback_approve__', tone: 'allow', label: 'approval.allowOnce' },
+  { id: '__fallback_reject__', tone: 'reject', label: 'approval.rejectOnce' },
+];
+
+/** 这个选项是不是我们造出来的兜底动作（决定要不要回传 option_id）。 */
+export function isFallbackOption(optionId: string): boolean {
+  return optionId.startsWith('__fallback_');
+}
+
+/** 兜底动作对应的决策。 */
+export function decisionForFallback(optionId: string): 'approve' | 'reject' {
+  return optionId === '__fallback_reject__' ? 'reject' : 'approve';
+}
+
 /** 从整块内容里找出待处理的审批。已决的不再展示。 */
 function approvalFromBlocks(blocks: Record<string, UIMessage>): PendingApproval | null {
   for (const message of Object.values(blocks)) {
@@ -271,6 +300,8 @@ function approvalFromBlocks(blocks: Record<string, UIMessage>): PendingApproval 
     if (approval === undefined || approval.approval_id === '') continue;
     if (!isPending(approval.status)) continue;
     if (approval.can_approve === false) continue;
+
+    const agentOptions = (approval.options ?? []).map(toApprovalChoice);
     return {
       approvalId: approval.approval_id,
       shortId: approval.short_id,
@@ -278,8 +309,8 @@ function approvalFromBlocks(blocks: Record<string, UIMessage>): PendingApproval 
       sessionId: '',
       toolName: message.name ?? '',
       toolInput: message.input,
-      options: (approval.options ?? []).map(toApprovalChoice),
-      // 上面已经过滤掉 can_approve === false 的审批。
+      // agent 没给选项时用兜底，而不是给一个空数组——空数组会让审批框没有按钮。
+      options: agentOptions.length > 0 ? agentOptions : FALLBACK_APPROVAL_OPTIONS,
       canApprove: true,
     };
   }

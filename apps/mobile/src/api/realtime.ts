@@ -279,7 +279,8 @@ export class MemohRealtime {
     sessionId: string;
     runId: string;
     approvalId: string;
-    optionId: string;
+    /** agent 定义的选项 id；agent 没给选项时省略，改用 `decision`。 */
+    optionId?: string;
     decision?: 'approve' | 'reject';
     reason?: string;
     controlId?: string;

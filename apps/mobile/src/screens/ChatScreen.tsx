@@ -140,6 +140,31 @@ export function ChatScreen() {
         </View>
       ) : null}
 
+      {/*
+        run 失败时说清楚。之前 `runError` 只存在状态里、界面上什么都不显示，
+        用户的感受就是"卡住了"——而实际上服务端已经给了明确的原因。
+      */}
+      {chat.runStatus === 'errored' ? (
+        <View
+          style={{
+            backgroundColor: palette.field,
+            paddingHorizontal: spacing.lg,
+            paddingVertical: spacing.md,
+            borderBottomWidth: StyleSheet.hairlineWidth,
+            borderBottomColor: palette.separator,
+          }}
+        >
+          <Text style={[typography.subhead, { color: palette.destructive }]}>
+            {t('chat.run.failed')}
+          </Text>
+          {chat.runError !== null ? (
+            <Text style={[typography.footnote, { color: palette.secondaryLabel, marginTop: 2 }]}>
+              {chat.runError}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+
       <NativeMessageList
         key={sessionId}
         turnsJson={turnsJson}

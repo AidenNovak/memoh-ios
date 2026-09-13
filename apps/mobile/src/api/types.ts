@@ -300,3 +300,22 @@ export function createdSessionId(response: unknown): string | null {
   if (typeof record.session_id === 'string') return record.session_id;
   return null;
 }
+
+// ---------------------------------------------------------------- 模型
+
+/**
+ * 一个可用的模型。
+ *
+ * 注意 `enable`：**导入或新建的模型默认是 disabled**。不显式启用的话 run 会在
+ * 解析阶段失败（"chat model ... is disabled"），而那个错误看起来像模型不可用，
+ * 不像配置没生效。
+ */
+export interface ModelSummary {
+  id: string;
+  model_id: string;
+  name: string;
+  provider_id: string;
+  type?: string;
+  enable?: boolean;
+  config?: Record<string, unknown>;
+}

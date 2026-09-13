@@ -111,9 +111,20 @@ function ChoiceButton({ choice, onPress }: { choice: ApprovalChoice; onPress: ()
   const { spacing, radius, typography } = useTheme();
   const t = useT();
 
-  // agent 给了名字就用它的；没有就用本地化兜底文案（按语气选）。
-  const label =
-    choice.label !== undefined && choice.label !== '' ? choice.label : t(fallbackLabelKey(choice));
+  /**
+   * 文案来源有三层，优先级从高到低：
+   *   1. agent 给的名字（它最清楚这个动作的含义）
+   *   2. 我们的兜底动作（`__fallback_*`）——它的 label 存的是 i18n key
+   *   3. 按语气猜一个通用文案
+   *
+   * 第 2 层必须走 i18n：兜底动作是我们造出来的，agent 不可能给它命名。
+   */
+  let label: string;
+  if (choice.label !== undefined && choice.label !== '') {
+    label = choice.label.startsWith('approval.') ? t(choice.label) : choice.label;
+  } else {
+    label = t(fallbackLabelKey(choice));
+  }
 
   const tone =
     choice.tone === 'allow'

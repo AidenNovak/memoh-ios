@@ -64,6 +64,17 @@ export interface PendingApproval {
   sessionId: string;
   toolName: string;
   toolInput?: unknown;
+  /**
+   * agent 定义的选项。**可能是空的**。
+   *
+   * 实测（`tools/approval-shape.mjs`）：agent 没有定义权限选项时，服务端返回的
+   * approval 里根本没有 `options` 字段，只有
+   * `{approval_id, short_id, status, can_approve}`。
+   *
+   * 这时必须回退到"批准 / 拒绝"两个动作——否则界面会变成一个**没有任何按钮的审批框**，
+   * run 永远卡在 `waiting_decision` 上，而用户不知道原因。官方 Web 客户端也是这个
+   * 回退逻辑（`tool-approval-actions.vue`）。
+   */
   options: ApprovalChoice[];
   canApprove: boolean;
 }
