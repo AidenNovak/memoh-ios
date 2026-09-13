@@ -21,6 +21,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import subprocess
 import sys
 import tempfile
@@ -93,6 +94,21 @@ def run_check(check, sources, udid, timeout=300):
     return result
 
 
+def external_dependency(sources):
+    """返回让这些源码无法独立编译的外部模块名，没有则返回 None。
+
+    只认 Expo 模块：UIKit/Foundation/SwiftUI 都是 SDK 自带的，独立编译没问题；
+    `ExpoModulesCore` / `ExpoModulesJSI` 之类只存在于 Pods，不在 SDK 里。
+    """
+    pattern = re.compile(r'^\s*import\s+(Expo[A-Za-z0-9_]*)', re.MULTILINE)
+    for source in sources:
+        text = source.read_text(encoding='utf-8', errors='replace')
+        match = pattern.search(text)
+        if match:
+            return match.group(1)
+    return None
+
+
 def select_checks(name):
     if name is None:
         return dict(CHECKS)
@@ -115,6 +131,123 @@ def run_all(checks, udid, stream=sys.stdout):
             report.append(entry)
             print(json.dumps(entry), file=stream, flush=True)
             continue
+
+        # 有些源码依赖 Expo 模块的框架，脱离 Pods 的独立编译不可能成功。
+        # 这类不是"检查失败"，而是"这个检查方式不适用于它"——报 skipped 并说清
+        # 真正的验证在哪，比伪造一个 pass 或报一个看不懂的编译错误都诚实。
+        blocker = external_dependency(sources)
+        if blocker is not None:
+            entry = {
+                'check': name,
+                'status': 'skipped',
+                'reason': (
+                    f'{blocker} 需要 Expo 框架才能编译，独立 swiftc 无法解析；'
+                    '它的真实验证在 `pnpm verify:build`（完整 Xcode 构建会编到这些源码）'
+                ),
+            }
+            report.append(entry)
+            print(json.dumps(entry), file=stream, flush=True)
+            continue
+
+        started = time.monotonic()
+        try:
+            result = run_check(check, sources, udid)
+        except subprocess.TimeoutExpired:
+            entry = {'check': name, 'status': 'failed', 'reason': 'check timed out'}
+            failed = True
+        except subprocess.CalledProcessError as error:
+            tail = error.stderr if isinstance(error.stderr, str) else ''
+            entry = {'check': name, 'status': 'failed', 'reason': f'swiftc failed: {tail.strip()[-400:]}'}
+            failed = True
+        else:
+            output = (result.stdout or '') + (result.stderr or '')
+            if result.returncode != 0:
+                entry = {
+                    'check': name,
+                    'status': 'failed',
+                    'reason': output.strip()[-400:] or f'exit {result.returncode}',
+                }
+                failed = True
+            else:
+                entry = {
+                    'check': name,
+                    'status': 'passed',
+                    'sources': len(sources),
+                    'output': output.strip()[-400:],
+                }
+        entry['seconds'] = round(time.monotonic() - started, 2)
+        report.append(entry)
+        print(json.dumps(entry), file=stream, flush=True)
+    # A skip is not a pass: it is reported, but only a failure fails the run.
+    return 1 if failed else 0
+
+
+def parse_arguments(argv):
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--case', help='Run one named check instead of all of them')
+    parser.add_argument('--list', action='store_true', help='List checks and exit')
+    parser.add_argument('--udid', default=os.environ.get(ENVIRONMENT_VARIABLE) or None,
+                        help=f'Existing Simulator; omit to lease one ({ENVIRONMENT_VARIABLE} is read too)')
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    arguments = parse_arguments(argv)
+    if arguments.list:
+        for name, check in CHECKS.items():
+            print(f'{name}\t{check["description"]}')
+        return 0
+    checks = select_checks(arguments.case)
+    if arguments.udid is None:
+        command = [sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]]
+        return run_with_simulator(SimulatorPool(device_type=DEVICE_TYPES['iphone']), 'Native', command)
+    return run_all(checks, arguments.udid)
+
+
+if __name__ == '__main__':
+    sys.exit(main())
+
+
+def select_checks(name):
+    if name is None:
+        return dict(CHECKS)
+    if name not in CHECKS:
+        raise SystemExit(f'unknown check {name!r}; choose from {", ".join(CHECKS)}')
+    return {name: CHECKS[name]}
+
+
+def run_all(checks, udid, stream=sys.stdout):
+    report = []
+    failed = False
+    for name, check in checks.items():
+        sources = expand_sources(check)
+        if check['sources'] and not sources:
+            entry = {
+                'check': name,
+                'status': 'skipped',
+                'reason': f'no Swift sources matched {check["sources"]} under {KIT}',
+            }
+            report.append(entry)
+            print(json.dumps(entry), file=stream, flush=True)
+            continue
+
+        # 有些源码依赖 Expo 模块的框架，脱离 Pods 的独立编译不可能成功。
+        # 这类不是"检查失败"，而是"这个检查方式不适用于它"——报 skipped 并说清
+        # 真正的验证在哪，比伪造一个 pass 或报一个看不懂的编译错误都诚实。
+        blocker = external_dependency(sources)
+        if blocker is not None:
+            entry = {
+                'check': name,
+                'status': 'skipped',
+                'reason': (
+                    f'{blocker} 需要 Expo 框架才能编译，独立 swiftc 无法解析；'
+                    '它的真实验证在 `pnpm verify:build`（完整 Xcode 构建会编到这些源码）'
+                ),
+            }
+            report.append(entry)
+            print(json.dumps(entry), file=stream, flush=True)
+            continue
+
         started = time.monotonic()
         try:
             result = run_check(check, sources, udid)

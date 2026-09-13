@@ -10,15 +10,20 @@
  * 人在路上点一下"允许"就能让它继续，这是桌面替代不了的场景。
  */
 import { useRouter } from 'expo-router';
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useT } from '../lib/i18n/useT.ts';
 import { usePalette, useTheme } from '../lib/theme/context.tsx';
 import { useSession, type SessionSummary } from '../features/session/store.tsx';
+import {
+  useSessionActivity,
+  type SessionActivity,
+} from '../features/activity/useSessionActivity.ts';
 import { BotSwitcher } from '../ui/BotSwitcher.tsx';
 import { ConnectionBadge } from '../ui/ConnectionBadge.tsx';
+import { PendingApprovals } from '../ui/PendingApprovals.tsx';
 
 export function HomeScreen() {
   const palette = usePalette();
@@ -26,7 +31,16 @@ export function HomeScreen() {
   const insets = useSafeAreaInsets();
   const t = useT();
   const router = useRouter();
-  const { state, refreshSessions, openSession, currentBot } = useSession();
+  const { state, refreshSessions, openSession, selectBot, currentBot } = useSession();
+  /**
+   * agent 7x24 在跑，所以首页要能看到"谁在等我"——这是移动端最该做的事。
+   *
+   * 已知取舍：这会为每个 bot 多开一条 WebSocket（当前会话那条由 store 持有）。对
+   * 自托管用户的 1–3 个 bot 来说代价可忽略，换来的是"首页直接看到待审批"。要消除
+   * 这条冗余，得把 store 改成"一条连接订阅多个会话"并跨 bot 共享状态，那是更大的
+   * 重构，等有明确性能压力时再做。
+   */
+  const { pending, active } = useSessionActivity(state.client, state.bots);
 
   const { sessions, sessionsLoading } = state;
 
@@ -37,6 +51,36 @@ export function HomeScreen() {
     },
     [openSession, router],
   );
+
+  /**
+   * 点一条活动项。
+   *
+   * 待处理项可能属于**另一个 bot**——用户在看 A 的时候 B 在等他批准。所以要先切 bot
+   * （否则 chat 页连到错的实时通道上，进去是空的），等会话列表切过来之后再跳转。
+   * 用一个 pendingJump 记住目标，会话列表就绪后执行。
+   */
+  const [pendingJump, setPendingJump] = useState<string | null>(null);
+
+  const onOpenActivity = useCallback(
+    (entry: SessionActivity) => {
+      if (entry.botId !== state.currentBotId) {
+        setPendingJump(entry.sessionId);
+        selectBot(entry.botId);
+        return;
+      }
+      onOpen(entry.sessionId);
+    },
+    [onOpen, selectBot, state.currentBotId],
+  );
+
+  useEffect(() => {
+    if (pendingJump === null) return;
+    const stillThere = state.sessions.some((session) => session.id === pendingJump);
+    if (!stillThere && state.sessionsLoading) return; // 还在加载，再等等
+    const target = pendingJump;
+    setPendingJump(null);
+    onOpen(target);
+  }, [pendingJump, state.sessions, state.sessionsLoading, onOpen]);
 
   const onNew = useCallback(() => {
     router.push('/chat/new');
@@ -58,9 +102,11 @@ export function HomeScreen() {
           <Text style={[typography.title2, { color: palette.label }]}>{t('home.title')}</Text>
           <ConnectionBadge />
         </View>
+        <PendingApprovals entries={pending} onOpen={onOpenActivity} />
+        <ActiveRuns entries={active} />
       </View>
     ),
-    [palette.label, spacing.lg, spacing.sm, t, typography.title2],
+    [active, onOpenActivity, palette.label, pending, spacing.lg, spacing.sm, t, typography.title2],
   );
 
   const empty = (
@@ -107,6 +153,37 @@ export function HomeScreen() {
       >
         <Text style={styles.fabGlyph}>＋</Text>
       </Pressable>
+    </View>
+  );
+}
+
+/** 正在跑的会话。比待审批弱一档——用户不需要动手，但知道"它在干活"是安心的。 */
+function ActiveRuns({ entries }: { entries: SessionActivity[] }) {
+  const { spacing, typography } = useTheme();
+  const palette = usePalette();
+  const t = useT();
+  // 待审批的已经在上面单独显示了，这里不重复。
+  const running = entries.filter((entry) => entry.status !== 'waiting_decision');
+  if (running.length === 0) return null;
+
+  return (
+    <View style={{ paddingHorizontal: spacing.lg, marginBottom: spacing.sm }}>
+      {running.map((entry) => (
+        <View
+          key={entry.sessionId}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 28 }}
+        >
+          <View
+            style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: palette.success }}
+          />
+          <Text
+            style={[typography.footnote, { color: palette.secondaryLabel, flex: 1 }]}
+            numberOfLines={1}
+          >
+            {entry.sessionTitle} · {t('chat.thinking')}
+          </Text>
+        </View>
+      ))}
     </View>
   );
 }

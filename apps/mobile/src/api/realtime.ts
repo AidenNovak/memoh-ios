@@ -17,7 +17,13 @@
  *    仓库 nginx 对这条路径的 `proxy_read_timeout` 是 300s。所以客户端必须自己
  *    保活：周期重发幂等的 `runtime_subscribe`，既续命又顺带纠正状态。
  */
-import type { ClientFrame, RuntimeCursor, ServerFrame } from './protocol.ts';
+import type {
+  ClientFrame,
+  RuntimeCursor,
+  RuntimeDelta,
+  RuntimeSnapshotPayload,
+  ServerFrame,
+} from './protocol.ts';
 import { frameType } from './protocol.ts';
 import type { UIAttachment } from './types.ts';
 import { HEARTBEAT_INTERVAL_MS, judgeDelta, judgeSnapshot, reconnectDelay } from './cursor.ts';
@@ -28,15 +34,18 @@ const MAX_FRAME_BYTES = 8 * 1024 * 1024;
 export type ConnectionState = 'idle' | 'connecting' | 'open' | 'reconnecting' | 'closed';
 
 export interface SessionSnapshot {
+  /** 这条投影属于哪个会话。没有它，调用方无法把帧归到某个会话上。 */
+  sessionId: string;
   epoch: string;
   seq: number;
-  snapshot: Record<string, unknown>;
+  snapshot: RuntimeSnapshotPayload;
 }
 
 export interface SessionDelta {
+  sessionId: string;
   epoch: string;
   seq: number;
-  delta: Record<string, unknown>;
+  delta: RuntimeDelta;
 }
 
 /**
@@ -520,9 +529,17 @@ export class MemohRealtime {
     // snapshot 是权威状态，直接覆盖本地游标——不存在"比本地旧"的合法情况。
     this.subscriptions.set(sessionId, judgeSnapshot({ epoch, seq }));
     this.listener.onSnapshot?.({
+      sessionId,
       epoch,
       seq,
-      snapshot: (frame.snapshot ?? {}) as Record<string, unknown>,
+      // 服务端在真实帧里保证了 snapshot 的形状；这里给一个空的兜底，让"字段缺失"
+      // 表现为空状态而不是崩溃。
+      snapshot: (frame.snapshot ?? {
+        bot_id: '',
+        session_id: sessionId,
+        epoch,
+        seq,
+      }) as unknown as RuntimeSnapshotPayload,
     });
   }
 
@@ -558,7 +575,7 @@ export class MemohRealtime {
         return;
       case 'apply':
         this.subscriptions.set(sessionId, verdict.cursor);
-        this.listener.onDelta?.({ epoch, seq, delta });
+        this.listener.onDelta?.({ sessionId, epoch, seq, delta: delta as RuntimeDelta });
         return;
     }
   }

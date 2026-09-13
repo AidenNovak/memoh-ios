@@ -421,8 +421,8 @@ export function applySnapshot(state: ChatState, payload: RuntimeSnapshotPayload)
     seq: payload.seq,
     // 历史由 REST 维护；snapshot 只负责活跃 run 的部分。
     history: state.history,
-    // 权威状态到了，本地乐观内容里还没有对应轮次的可以留着，其余丢掉。
-    optimistic: state.optimistic.filter((turn) => !hasServerTurn(state, run, turn.key)),
+    // 服务端给出这一轮的用户输入之后，才可以丢掉本地的乐观副本。
+    optimistic: state.optimistic.filter((turn) => !hasServerTurn(run, turn.key)),
     runId: run?.run_id ?? null,
     runStatus: run?.status ?? null,
     runError: typeof run?.error === 'string' && run.error !== '' ? run.error : null,
@@ -436,11 +436,20 @@ export function applySnapshot(state: ChatState, payload: RuntimeSnapshotPayload)
 }
 
 /** 服务端是否已经有这个 turn（用于清掉对应的乐观占位）。 */
-function hasServerTurn(state: ChatState, run: CurrentRunView | null, key: string): boolean {
+/**
+ * 服务端是否已经能替代这条本地乐观消息。
+ *
+ * ⚠️ 只有在**真的拿到了服务端的用户轮次**时才算数。早期版本只看
+ * `run.invocation_id === invocationId`，结果 run 跑到 `admitting`（此时
+ * `user_turns` 还是 null）就把乐观消息清了，屏幕上用户提问直接消失，只剩助手回复。
+ *
+ * 判据是"服务端有没有给出这一轮的用户输入"，不是"服务端知不知道这个 invocation"。
+ */
+function hasServerTurn(run: CurrentRunView | null, key: string): boolean {
   if (!key.startsWith('local-')) return false;
   const invocationId = key.slice('local-'.length);
-  if (run?.invocation_id === invocationId) return true;
-  return false;
+  if (run?.invocation_id !== invocationId) return false;
+  return (run.user_turns?.length ?? 0) > 0;
 }
 
 /**
@@ -521,9 +530,26 @@ function mergeUserTurns(existing: UITurn[], incoming: UITurn[]): UITurn[] {
   return [...byId.values()];
 }
 
-/** 用 REST 拿到的历史覆盖已完成轮次。活跃 run 的内容由 snapshot/delta 维护。 */
+/**
+ * 用 REST 历史覆盖已完成轮次。活跃 run 的内容由 snapshot/delta 维护。
+ *
+ * ⚠️ 必须同时清掉**本地推测**与**活跃 run 的快照**，否则屏幕上会出现两份：
+ * 历史里合并好的那一条，加上 live 视图里还没收起来的另一份。这个函数被调用的时机
+ * 正是"run 刚结束"，那时候服务端已经落盘，本地推测没有任何保留价值。
+ */
 export function applyHistory(state: ChatState, turns: UITurn[]): ChatState {
-  return { ...state, history: renderTurns(turns, {}) };
+  return {
+    ...state,
+    history: renderTurns(turns, {}),
+    // 权威历史到了：本地乐观内容与活跃 run 的渲染缓冲都可以收起来。
+    optimistic: [],
+    liveUserTurns: [],
+    blocks: {},
+    order: [],
+    streams: {},
+    progress: {},
+    pendingSend: false,
+  };
 }
 
 // ---------------------------------------------------------------- 本地动作
@@ -605,20 +631,31 @@ function liveAssistantMessage(state: ChatState): RenderMessage | null {
 }
 
 /**
- * 展示用轮次：历史 → 活跃 run 的用户输入 → 活跃 run 的助手输出 → 本地乐观。
+ * 展示用轮次。
  *
- * 这是唯一做合并的地方；每帧只组装一次，不重建消息内容。
+ * 顺序：已完成历史 → 当前轮的用户输入 → 当前轮的助手输出。
+ *
+ * ⚠️ 两个曾经踩过的坑，都在这个函数的顺序上：
+ *
+ * 1. **本地乐观消息必须排在助手输出之前。** 早期版本把它 push 到最后，结果屏幕上是
+ *    "助手回复在上、用户提问在下"——顺序反了，看起来像模型抢答。
+ *
+ * 2. **run 期间服务端不一定给 `user_turns`。** 实测（`tools/turn-probe.mjs`）：
+ *    run 跑到 `admitting` 时 `current_run_view.user_turns` 是 `null`，权威的用户轮次
+ *    要等 REST 历史才有。所以当 `liveUserTurns` 为空时，**乐观消息就是这一轮的用户
+ *    输入**，不能当成"多余的东西"丢掉。
  */
 export function turnsForDisplay(state: ChatState): RenderTurn[] {
   const result = state.history.slice();
 
-  if (state.liveUserTurns.length > 0) {
-    const live = renderTurns(state.liveUserTurns, state.streams).map((turn) => ({
-      ...turn,
-      position: turn.position + 1_000_000,
-    }));
-    result.push(...live);
-  }
+  // 当前轮的用户输入：优先用服务端权威的，没有就用本地的乐观版本。
+  const liveUser =
+    state.liveUserTurns.length > 0 ? renderTurns(state.liveUserTurns, state.streams) : [];
+  const userInputs =
+    liveUser.length > 0
+      ? liveUser.map((turn) => ({ ...turn, position: Number.MAX_SAFE_INTEGER - 2 }))
+      : state.optimistic.map((turn) => ({ ...turn, position: Number.MAX_SAFE_INTEGER - 2 }));
+  result.push(...userInputs);
 
   const assistant = liveAssistantMessage(state);
   if (assistant !== null) {
@@ -630,7 +667,6 @@ export function turnsForDisplay(state: ChatState): RenderTurn[] {
     });
   }
 
-  result.push(...state.optimistic);
   return result;
 }
 

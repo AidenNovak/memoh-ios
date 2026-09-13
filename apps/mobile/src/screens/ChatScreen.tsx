@@ -1,15 +1,7 @@
-/**
- * 聊天页 —— App 的核心。
- *
- * 这一版是 RN 实现，先把协议、状态、交互跑通；消息流的虚拟化与流式文本的原生
- * 渲染（UICollectionView + CoreText）留给 MemohKit，那时只换这一层，状态与协议
- * 不动。这个顺序是刻意的：先让链路正确，再让手感到位。
- */
+/** Chat orchestration; transcript rendering belongs to MemohKit. */
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
-  FlatList,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -20,7 +12,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import type { RenderBlock, RenderTurn } from '../models/chat.ts';
+import { NativeMessageList } from '@memoh-ios/kit';
 import { useSession } from '../features/session/store.tsx';
 import { hasContent, turnsForDisplay, type ChatState } from '../features/chat/reducer.ts';
 import { useT } from '../lib/i18n/useT.ts';
@@ -65,7 +57,7 @@ export function ChatScreen() {
     state.sessions.find((entry) => entry.id === sessionId)?.title ?? t('chat.placeholder');
 
   const [draft, setDraft] = useState('');
-  const listRef = useRef<FlatList<RenderTurn>>(null);
+  const turnsJson = useMemo(() => JSON.stringify(turns), [turns]);
 
   const onSend = useCallback(() => {
     const text = draft.trim();
@@ -73,8 +65,6 @@ export function ChatScreen() {
     const invocationId = sendMessage(text);
     if (invocationId === null) return;
     setDraft('');
-    // 乐观消息插入后滚到底。
-    requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
   }, [draft, sendMessage]);
 
   return (
@@ -120,33 +110,12 @@ export function ChatScreen() {
         </View>
       ) : null}
 
-      <FlatList
-        ref={listRef}
-        data={turns}
-        keyExtractor={(turn) => turn.key}
-        contentContainerStyle={{
-          padding: spacing.lg,
-          paddingBottom: spacing.xl,
-          flexGrow: 1,
-        }}
-        ListEmptyComponent={
-          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80 }}>
-            <Text style={[typography.headline, { color: palette.label, marginBottom: spacing.xs }]}>
-              {t('chat.empty.title')}
-            </Text>
-            <Text
-              style={[typography.subhead, { color: palette.secondaryLabel, textAlign: 'center' }]}
-            >
-              {t('chat.empty.body')}
-            </Text>
-          </View>
-        }
-        renderItem={({ item }) => <TurnView turn={item} />}
-        onContentSizeChange={() => {
-          // 新内容到达时跟随到底部。用户在往回翻时不打扰——这是后续要做的判断，
-          // 现在先无条件跟随，因为消息量还小。
-          listRef.current?.scrollToEnd({ animated: false });
-        }}
+      <NativeMessageList
+        key={sessionId}
+        turnsJson={turnsJson}
+        style={{ flex: 1 }}
+        emptyTitle={t('chat.empty.title')}
+        emptyBody={t('chat.empty.body')}
       />
 
       {chat.running ? (
@@ -227,138 +196,6 @@ export function ChatScreen() {
       <ApprovalSheet approval={chat.approval} onChoose={respondApproval} />
     </KeyboardAvoidingView>
   );
-}
-
-function TurnView({ turn }: { turn: RenderTurn }) {
-  const { spacing } = useTheme();
-  return (
-    <View style={{ marginBottom: spacing.lg, gap: spacing.sm }}>
-      {turn.user !== undefined ? <UserBubble turn={turn} /> : null}
-      {turn.assistant !== undefined ? <AssistantBlocks blocks={turn.assistant.blocks} /> : null}
-    </View>
-  );
-}
-
-function UserBubble({ turn }: { turn: RenderTurn }) {
-  const palette = usePalette();
-  const { spacing, typography } = useTheme();
-  const text = (turn.user?.blocks ?? [])
-    .map((block) => (block.kind === 'text' ? block.text : ''))
-    .join('');
-
-  return (
-    <View style={{ alignItems: 'flex-end' }}>
-      <View
-        style={{
-          backgroundColor: palette.accent,
-          borderRadius: 18,
-          paddingHorizontal: spacing.md,
-          paddingVertical: spacing.sm,
-          maxWidth: '84%',
-        }}
-      >
-        <Text style={[typography.body, { color: '#FFFFFF' }]}>{text}</Text>
-      </View>
-    </View>
-  );
-}
-
-function AssistantBlocks({ blocks }: { blocks: RenderBlock[] }) {
-  const { spacing } = useTheme();
-  return (
-    <View style={{ gap: spacing.sm }}>
-      {blocks.map((block) => (
-        <BlockView key={block.key} block={block} />
-      ))}
-    </View>
-  );
-}
-
-function BlockView({ block }: { block: RenderBlock }) {
-  const palette = usePalette();
-  const { spacing, typography, radius } = useTheme();
-  const t = useT();
-
-  switch (block.kind) {
-    case 'text':
-      return (
-        <Text style={[typography.body, { color: palette.label }]} selectable>
-          {block.text}
-        </Text>
-      );
-    case 'reasoning':
-      return (
-        <View
-          style={{
-            borderLeftWidth: 2,
-            borderLeftColor: palette.separator,
-            paddingLeft: spacing.md,
-          }}
-        >
-          <Text style={[typography.caption, { color: palette.tertiaryLabel, marginBottom: 2 }]}>
-            {t('chat.reasoning')}
-          </Text>
-          <Text style={[typography.footnote, { color: palette.secondaryLabel }]}>{block.text}</Text>
-        </View>
-      );
-    case 'tool':
-      return (
-        <View
-          style={{
-            backgroundColor: palette.card,
-            borderRadius: radius.md,
-            borderWidth: StyleSheet.hairlineWidth,
-            borderColor: palette.separator,
-            padding: spacing.md,
-          }}
-        >
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
-            <View
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: 3,
-                backgroundColor:
-                  block.status === 'running'
-                    ? palette.warning
-                    : block.status === 'failed'
-                      ? palette.destructive
-                      : palette.success,
-              }}
-            />
-            <Text
-              style={[typography.footnote, { color: palette.secondaryLabel, flex: 1 }]}
-              numberOfLines={1}
-            >
-              {block.title !== '' ? block.title : block.name}
-            </Text>
-            {block.status === 'running' ? (
-              <ActivityIndicator size="small" color={palette.secondaryLabel} />
-            ) : null}
-          </View>
-        </View>
-      );
-    case 'error':
-      return (
-        <Text style={[typography.footnote, { color: palette.destructive }]}>{block.text}</Text>
-      );
-    case 'notice':
-      return (
-        <Text style={[typography.footnote, { color: palette.secondaryLabel }]}>{block.text}</Text>
-      );
-    case 'attachments':
-      return (
-        <View style={{ gap: spacing.xs }}>
-          {block.items.map((item) => (
-            <Text key={item.key} style={[typography.footnote, { color: palette.accent }]}>
-              {item.name}
-            </Text>
-          ))}
-        </View>
-      );
-    default:
-      return null;
-  }
 }
 
 const styles = StyleSheet.create({

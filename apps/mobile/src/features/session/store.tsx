@@ -26,7 +26,6 @@ import { AppState as RNAppState } from 'react-native';
 
 import { ApiError, MemohClient } from '../../api/client.ts';
 import { MemohRealtime, type ConnectionState } from '../../api/realtime.ts';
-import type { RuntimeDelta, RuntimeSnapshotPayload } from '../../api/protocol.ts';
 import { canOpenRealtime, type Bot, type Session as MemohSession } from '../../api/types.ts';
 import {
   appendOptimisticUserMessage,
@@ -179,6 +178,8 @@ export function SessionProvider({
   const realtimeRef = useRef<MemohRealtime | null>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
+  /** sessionId → 上一次渲染时是否在跑。用来捕捉"跑完了"这个边沿。 */
+  const prevRunningRef = useRef<Record<string, boolean>>({});
 
   const currentBot = useMemo(
     () => state.bots.find((bot) => bot.id === state.currentBotId) ?? null,
@@ -237,19 +238,23 @@ export function SessionProvider({
       listener: {
         onStateChange: (connection) => dispatch({ type: 'connection', state: connection }),
         onSnapshot: (frame) => {
-          const sessionId = stateRef.current.currentSessionId;
-          if (sessionId === null) return;
-          const payload = frame.snapshot as unknown as RuntimeSnapshotPayload;
-          dispatch({ type: 'chat', sessionId, update: (chat) => applySnapshot(chat, payload) });
-        },
-        onDelta: (frame) => {
-          const sessionId = stateRef.current.currentSessionId;
-          if (sessionId === null) return;
+          // 只应用当前正在看的那个会话。多会话订阅时服务端会把每个会话的帧都发过来，
+          // 不筛就会串台。帧自带 sessionId，不必靠时序猜。
+          const current = stateRef.current.currentSessionId;
+          if (current === null || frame.sessionId !== current) return;
           dispatch({
             type: 'chat',
-            sessionId,
-            update: (chat) =>
-              applyDelta(chat, frame.epoch, frame.seq, frame.delta as unknown as RuntimeDelta),
+            sessionId: current,
+            update: (chat) => applySnapshot(chat, frame.snapshot),
+          });
+        },
+        onDelta: (frame) => {
+          const current = stateRef.current.currentSessionId;
+          if (current === null || frame.sessionId !== current) return;
+          dispatch({
+            type: 'chat',
+            sessionId: current,
+            update: (chat) => applyDelta(chat, frame.epoch, frame.seq, frame.delta),
           });
         },
         onGap: () => {
@@ -285,32 +290,48 @@ export function SessionProvider({
     return () => subscription.remove();
   }, []);
 
+  /**
+   * 拉一次会话历史。
+   *
+   * 打开会话时要拉，**run 结束后也要拉**——因为运行期间服务端不一定给用户轮次
+   * （实测 `current_run_view.user_turns` 可能是 null），只有 REST 历史才是权威且完整的。
+   * 不刷新的话，屏幕上会一直挂着本地乐观版本，rebuild 之后顺序或内容可能与服务端不一致。
+   */
+  const refreshHistory = useCallback(async (sessionId: string) => {
+    const { client, currentBotId } = stateRef.current;
+    if (client === null || currentBotId === null) return;
+    try {
+      const response = await client.listMessages(currentBotId, sessionId, { limit: 100 });
+      dispatch({
+        type: 'chat',
+        sessionId,
+        update: (chat) => applyHistory(chat, response.items ?? []),
+      });
+    } catch (error) {
+      dispatch({ type: 'error', message: describeError(error) });
+    }
+  }, []);
+
   // 打开会话：拉历史 + 订阅实时。
   useEffect(() => {
-    const { client, currentBotId, currentSessionId } = state;
-    if (client === null || currentBotId === null || currentSessionId === null) return;
-
-    let cancelled = false;
-    void (async () => {
-      try {
-        const response = await client.listMessages(currentBotId, currentSessionId, { limit: 100 });
-        if (cancelled) return;
-        dispatch({
-          type: 'chat',
-          sessionId: currentSessionId,
-          update: (chat) => applyHistory(chat, response.items ?? []),
-        });
-      } catch (error) {
-        if (!cancelled) dispatch({ type: 'error', message: describeError(error) });
-      }
-    })();
-
+    const { client, currentSessionId } = state;
+    if (client === null || currentSessionId === null) return;
+    void refreshHistory(currentSessionId);
     realtimeRef.current?.subscribe(currentSessionId);
+  }, [state.client, state.currentSessionId, refreshHistory]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [state.client, state.currentBotId, state.currentSessionId]);
+  // run 从跑着变成结束 → 历史现在是权威的，拉一次覆盖本地推测。
+  useEffect(() => {
+    const { currentSessionId, chats } = state;
+    if (currentSessionId === null) return;
+    const chat = chats[currentSessionId];
+    if (chat === undefined) return;
+
+    const wasRunning = prevRunningRef.current[currentSessionId] === true;
+    prevRunningRef.current[currentSessionId] = chat.running;
+
+    if (wasRunning && !chat.running) void refreshHistory(currentSessionId);
+  }, [state.chats, state.currentSessionId, refreshHistory]);
 
   // ------------------------------------------------------------ 动作
 

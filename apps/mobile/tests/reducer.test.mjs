@@ -354,6 +354,110 @@ test('turnsForDisplay 把历史、活跃、乐观三层拼起来', () => {
   assert.ok(contents.includes('newest'));
 });
 
+test('用户提问排在助手回复之前（回归：曾经反序）', () => {
+  // 真机截图里助手回复渲染在用户气泡**上方**，看起来像模型抢答。
+  // 起因是乐观消息被 push 到了数组最后。屏幕顺序由数组顺序决定，所以要断言顺序。
+  //
+  // 注意：用户轮与助手轮在服务端是**两条独立的轮次**（REST 历史里 role=user 与
+  // role=assistant 各自一条），所以它们不会合并成一个 RenderTurn——断言要按"屏幕上
+  // 从上到下看到的顺序"来写，而不是"合并成一条"。
+  let state = appendOptimisticUserMessage(initialChatState, 'Say exactly: gamma', 'inv-9');
+  state = applyDelta(state, 'e1', 1, {
+    message_upserts: [textMessage(1, 'gamma', false)],
+    current_run_view: {
+      run_id: 'r1',
+      status: 'running',
+      messages: [textMessage(1, 'gamma', false)],
+    },
+  });
+
+  const lines = turnsForDisplay(state)
+    .filter(hasContent)
+    .flatMap((turn) => [
+      ...(turn.user?.blocks ?? []).map((block) => ({ role: 'user', text: block.text })),
+      ...(turn.assistant?.blocks ?? []).map((block) => ({ role: 'assistant', text: block.text })),
+    ]);
+
+  assert.equal(lines.length, 2, `应该正好两行，实际是 ${JSON.stringify(lines)}`);
+  assert.equal(lines[0].role, 'user');
+  assert.equal(lines[0].text, 'Say exactly: gamma');
+  assert.equal(lines[1].role, 'assistant');
+  assert.equal(lines[1].text, 'gamma');
+});
+
+test('run 期间服务端不发 user_turns 时，乐观消息要顶上（回归）', () => {
+  // 实测（tools/turn-probe.mjs）：run 跑到 admitting 时
+  // current_run_view.user_turns 是 null。早期版本此时就把乐观消息清了，
+  // 结果屏幕上用户提问直接消失，只剩助手回复。
+  let state = appendOptimisticUserMessage(initialChatState, 'hello', 'inv-a');
+  state = applySnapshot(state, {
+    bot_id: 'b1',
+    session_id: 's1',
+    epoch: 'e1',
+    seq: 1,
+    current_run_view: {
+      run_id: 'r1',
+      invocation_id: 'inv-a',
+      status: 'admitting',
+      messages: [],
+      // user_turns 故意缺失
+    },
+  });
+
+  assert.equal(state.optimistic.length, 1, '还不知道用户轮次时不能丢掉乐观消息');
+  const turns = turnsForDisplay(state).filter(hasContent);
+  assert.equal(turns[0]?.user?.blocks[0].text, 'hello');
+});
+
+test('服务端给出 user_turns 之后才让乐观消息退场', () => {
+  let state = appendOptimisticUserMessage(initialChatState, 'hello', 'inv-b');
+  state = applySnapshot(state, {
+    bot_id: 'b1',
+    session_id: 's1',
+    epoch: 'e1',
+    seq: 1,
+    current_run_view: {
+      run_id: 'r1',
+      invocation_id: 'inv-b',
+      status: 'running',
+      messages: [],
+      user_turns: [{ turn_id: 't1', role: 'user', text: 'hello', turn_position: 1 }],
+    },
+  });
+
+  assert.equal(state.optimistic.length, 0, '权威轮次到了，乐观副本该退场');
+  const turns = turnsForDisplay(state).filter(hasContent);
+  assert.equal(turns[0]?.user?.blocks[0].text, 'hello');
+});
+
+test('刷新历史后不会出现重复轮次（回归）', () => {
+  // run 结束时既拉历史、又保留活跃 run 的缓冲，屏幕上会出现两份同样的内容。
+  // 权威历史一到，本地推测与 run 缓冲都必须收起来。
+  let state = appendOptimisticUserMessage(initialChatState, 'Say exactly: delta', 'inv-d');
+  state = applyDelta(state, 'e1', 1, {
+    message_upserts: [textMessage(1, 'delta', false)],
+  });
+
+  const before = turnsForDisplay(state).filter(hasContent);
+  assert.ok(before.length >= 1, '刷新前应该有内容');
+
+  state = applyHistory(state, [
+    { turn_id: 't1', role: 'user', text: 'Say exactly: delta', turn_position: 1 },
+    {
+      turn_id: 't1',
+      role: 'assistant',
+      turn_position: 2,
+      messages: [{ id: 1, type: 'text', content: 'delta' }],
+    },
+  ]);
+
+  const after = turnsForDisplay(state).filter(hasContent);
+  const assistantLines = after.filter((turn) => (turn.assistant?.blocks.length ?? 0) > 0);
+  assert.equal(assistantLines.length, 1, '助手输出只能出现一次');
+  assert.equal(state.optimistic.length, 0);
+  assert.deepEqual(state.order, []);
+});
+
 test('hasContent 过滤空轮次', () => {
   assert.equal(hasContent({ key: 'x', position: 0, active: false }), false);
   assert.equal(
