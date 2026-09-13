@@ -79,6 +79,17 @@ class Driver:
             raise DriverError(f'{app} does not exist; build it with pnpm verify:build')
         self.simctl('install', self.udid, str(app), timeout=300)
 
+    def reset_keychain(self):
+        """清掉 App 在系统钥匙串里的数据。
+
+        验收要求"空手也能复现"，但上一次跑个 case 留下的登录凭据是**跨安装存活**的
+        ——重装 App 不会清掉它。不清就会出现"app-launch 期望看到登录页，实际直接
+        进了主界面"这种失败，而且看起来像 App 坏了。
+
+        只清钥匙串，不动用户的其他模拟器数据。
+        """
+        self.simctl('keychain', self.udid, 'reset')
+
     def terminate(self):
         self.simctl('terminate', self.udid, self.bundle_id, check=False)
 

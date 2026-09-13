@@ -165,6 +165,8 @@ def main(argv=None):
     seed_path = None
     try:
         driver.install()
+        # 先清钥匙串：上一次跑 case 留下的凭据会跨安装存活。
+        driver.reset_keychain()
         seed_path = write_seed(driver, base_url, password)
 
         driver.terminate()

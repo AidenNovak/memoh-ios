@@ -42,6 +42,14 @@ export interface SessionSummary {
   id: string;
   title: string;
   updatedAt: string;
+  /**
+   * 副标题用的来源标记。
+   *
+   * 会话列表接口**不返回最后一条消息**，所以不能伪造"消息预览"——那会让用户以为
+   * 那是真实内容。这里只展示服务端确实给了的字段（来源通道 / 会话类型），
+   * 它对"这个会话是从哪来的"这个问题也是有信息量的。
+   */
+  source: string;
 }
 
 interface UiState {
@@ -210,6 +218,7 @@ export function SessionProvider({
         id: item.id,
         title: item.title !== '' ? item.title : item.id.slice(0, 8),
         updatedAt: item.updated_at,
+        source: [item.channel_type, item.type].filter((part) => part !== '').join(' · '),
       }));
       dispatch({ type: 'sessions', sessions });
     } catch (error) {
@@ -312,13 +321,38 @@ export function SessionProvider({
     }
   }, []);
 
-  // 打开会话：拉历史 + 订阅实时。
+  /**
+   * 确保当前会话有标题可显示。
+   *
+   * 列表是分页的，当前会话不一定在里面（从通知进来、切过 bot、或列表还没加载完）。
+   * 拿不到就单独查一次——标题退化成占位文案时，所有会话长得一样，用户认不出自己在哪。
+   */
+  const ensureSessionInList = useCallback(async (sessionId: string) => {
+    const { client, currentBotId, sessions } = stateRef.current;
+    if (client === null || currentBotId === null) return;
+    if (sessions.some((session) => session.id === sessionId)) return;
+    try {
+      const session = await client.getSession(currentBotId, sessionId);
+      const summary: SessionSummary = {
+        id: session.id,
+        title: session.title !== '' ? session.title : session.id.slice(0, 8),
+        updatedAt: session.updated_at,
+        source: [session.channel_type, session.type].filter((part) => part !== '').join(' · '),
+      };
+      dispatch({ type: 'sessions', sessions: [summary, ...stateRef.current.sessions] });
+    } catch {
+      // 查不到就继续用占位标题——不为了一个标题把整页弄成错误态。
+    }
+  }, []);
+
+  // 打开会话：补标题 + 拉历史 + 订阅实时。
   useEffect(() => {
     const { client, currentSessionId } = state;
     if (client === null || currentSessionId === null) return;
+    void ensureSessionInList(currentSessionId);
     void refreshHistory(currentSessionId);
     realtimeRef.current?.subscribe(currentSessionId);
-  }, [state.client, state.currentSessionId, refreshHistory]);
+  }, [state.client, state.currentSessionId, refreshHistory, ensureSessionInList]);
 
   // run 从跑着变成结束 → 历史现在是权威的，拉一次覆盖本地推测。
   useEffect(() => {

@@ -118,39 +118,46 @@ export function LoginScreen({
         <Text style={[typography.largeTitle, { color: palette.label, marginBottom: spacing.xs }]}>
           {t('login.title')}
         </Text>
-        <Text
-          style={[typography.subhead, { color: palette.secondaryLabel, marginBottom: spacing.xl }]}
-        >
+        <Text style={[typography.subhead, { color: palette.secondaryLabel, marginBottom: 28 }]}>
           {t('login.subtitle')}
         </Text>
 
-        <Field
-          label={t('login.server')}
-          value={server}
-          onChangeText={setServer}
-          placeholder={t('login.server.placeholder')}
-          keyboardType="url"
-          autoCapitalize="none"
-          autoCorrect={false}
-          textContentType="URL"
-        />
-        <Field
-          label={t('login.username')}
-          value={username}
-          onChangeText={setUsername}
-          autoCapitalize="none"
-          autoCorrect={false}
-          textContentType="username"
-        />
-        <Field
-          label={t('login.password')}
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-          textContentType="password"
-          onSubmitEditing={() => void submit()}
-          returnKeyType="go"
-        />
+        <View
+          style={{
+            backgroundColor: palette.card,
+            borderRadius: radius.md,
+            overflow: 'hidden',
+          }}
+        >
+          <FormRow
+            label={t('login.server')}
+            value={server}
+            onChangeText={setServer}
+            placeholder={t('login.server.placeholder')}
+            keyboardType="url"
+            autoCapitalize="none"
+            autoCorrect={false}
+            textContentType="URL"
+          />
+          <FormRow
+            label={t('login.username')}
+            value={username}
+            onChangeText={setUsername}
+            autoCapitalize="none"
+            autoCorrect={false}
+            textContentType="username"
+          />
+          <FormRow
+            label={t('login.password')}
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+            textContentType="password"
+            onSubmitEditing={() => void submit()}
+            returnKeyType="go"
+            last
+          />
+        </View>
 
         {error !== null ? (
           <Text
@@ -194,21 +201,36 @@ export function LoginScreen({
   );
 }
 
-function Field({
+/**
+ * 分组表单行（系统「设置」的形态）。
+ *
+ * 之前用"全大写小标签悬浮在输入框上方"是 Web/Material 的模式，在 iOS 上会显得
+ * 不是原生——而且实测那个布局的**组内距（12pt）比组间距（11pt）还大**，眼睛会把
+ * 标签归到上一个框，读起来是乱的。
+ *
+ * 原生做法是：一张 inset 圆角卡片，行内左侧标签、右侧输入，行高 44pt（系统最小
+ * 触控目标），行间 0.5pt 发丝线且左缩进对齐文字起点。
+ */
+function FormRow({
   label,
+  last,
   ...inputProps
-}: { label: string } & React.ComponentProps<typeof TextInput>) {
+}: { label: string; last?: boolean } & React.ComponentProps<typeof TextInput>) {
   const palette = usePalette();
-  const { spacing, radius, typography } = useTheme();
+  const { spacing, typography } = useTheme();
 
   return (
-    <View style={{ marginBottom: spacing.md }}>
-      <Text
-        style={[
-          typography.footnote,
-          { color: palette.secondaryLabel, marginBottom: spacing.xs, textTransform: 'uppercase' },
-        ]}
-      >
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        minHeight: 44,
+        paddingHorizontal: spacing.lg,
+        borderBottomWidth: last === true ? 0 : StyleSheet.hairlineWidth,
+        borderBottomColor: palette.separator,
+      }}
+    >
+      <Text style={[typography.body, { color: palette.label, width: 88 }]} numberOfLines={1}>
         {label}
       </Text>
       <TextInput
@@ -218,14 +240,9 @@ function Field({
           typography.body,
           {
             color: palette.label,
-            backgroundColor: palette.card,
-            borderRadius: radius.md,
-            borderWidth: StyleSheet.hairlineWidth,
-            borderColor: palette.separator,
-            paddingHorizontal: spacing.md,
-            // 44pt 是 iOS 触控目标下限。
-            minHeight: 44,
+            flex: 1,
             paddingVertical: spacing.sm,
+            minHeight: 44,
           },
         ]}
       />

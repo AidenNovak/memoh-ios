@@ -93,6 +93,9 @@ def main(argv=None):
         app=arguments.app,
     )
     try:
+        # 先清钥匙串：凭据是跨安装存活的，不清就会出现"期望登录页、实际直接进了
+        # 主界面"的失败——那是上一轮验收的残留，不是 App 坏了。
+        driver.reset_keychain()
         # 冷启动：先终止，确保读到的不是上一个 case 留在屏幕上的内容。
         driver.terminate()
         pid = driver.launch(launch_arguments(arguments.metro_port, arguments.language))

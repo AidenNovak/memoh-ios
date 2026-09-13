@@ -17,7 +17,8 @@
     "verify:ui": "python3 verification/ui/run.py",
     "verify:native": "python3 verification/native.py",
     "verify:simulator": "python3 verification/simulator.py",
-    "verify:clean": "python3 verification/clean.py"
+    "verify:clean": "python3 verification/clean.py",
+    "ternary:check": "node ./scripts/check-ternaries.mjs"
   },
   "dependencies": {
     "@expo/ui": "~57.0.18",

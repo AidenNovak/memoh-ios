@@ -11,6 +11,7 @@
  */
 import type {
   Account,
+  Session,
   ListBotsResponse,
   ListSessionsResponse,
   LoginResponse,
@@ -179,6 +180,17 @@ export class MemohClient {
     return this.request<ListSessionsResponse>('GET', `/bots/${botId}/sessions`, {
       query: { limit: options.limit, cursor: options.cursor },
     });
+  }
+
+  /**
+   * 单个会话的详情。
+   *
+   * 会话列表是分页的（默认 50 条），所以"当前会话不在已加载的那一页里"是常态——
+   * 从通知、深链或另一个 bot 切进来时都会这样。直接拿列表去查标题会查不到，
+   * 标题就退化成占位文案，用户看不出自己在哪个会话里。
+   */
+  getSession(botId: string, sessionId: string): Promise<Session> {
+    return this.request<Session>('GET', `/bots/${botId}/sessions/${sessionId}`);
   }
 
   createSession(botId: string, body: Record<string, unknown>): Promise<unknown> {

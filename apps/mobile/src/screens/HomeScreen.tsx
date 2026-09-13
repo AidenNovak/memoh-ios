@@ -188,6 +188,15 @@ function ActiveRuns({ entries }: { entries: SessionActivity[] }) {
   );
 }
 
+/**
+ * 会话行。
+ *
+ * 两行结构：标题 + 副文本（预览），时间戳在**右侧**。之前时间戳挂在标题下方、
+ * 分隔线通到屏幕边缘——这两点都让列表显得不像原生：扫列表时眼睛要换行去读时间，
+ * 而通栏分隔线是 Web 表格的习惯。
+ *
+ * 原生列表的做法：时间戳右对齐（眼睛不换行），分隔线左缩进对齐文字起点，行高 64pt。
+ */
 function SessionRow({ session, onPress }: { session: SessionSummary; onPress: () => void }) {
   const palette = usePalette();
   const { spacing, typography } = useTheme();
@@ -200,18 +209,34 @@ function SessionRow({ session, onPress }: { session: SessionSummary; onPress: ()
         styles.row,
         {
           backgroundColor: pressed ? palette.field : palette.card,
-          borderBottomColor: palette.separator,
           paddingHorizontal: spacing.lg,
-          paddingVertical: spacing.md,
         },
       ]}
     >
-      <Text style={[typography.body, { color: palette.label }]} numberOfLines={1}>
-        {session.title}
-      </Text>
-      <Text style={[typography.footnote, { color: palette.tertiaryLabel, marginTop: 2 }]}>
+      <View style={{ flex: 1, marginRight: spacing.sm }}>
+        <Text style={[typography.body, { color: palette.label }]} numberOfLines={1}>
+          {session.title}
+        </Text>
+        <Text
+          style={[typography.footnote, { color: palette.secondaryLabel, marginTop: 2 }]}
+          numberOfLines={1}
+        >
+          {session.source}
+        </Text>
+      </View>
+      <Text style={[typography.footnote, { color: palette.tertiaryLabel }]}>
         {formatRelative(session.updatedAt)}
       </Text>
+      <View
+        style={{
+          position: 'absolute',
+          left: spacing.lg,
+          right: 0,
+          bottom: 0,
+          height: StyleSheet.hairlineWidth,
+          backgroundColor: palette.separator,
+        }}
+      />
     </Pressable>
   );
 }

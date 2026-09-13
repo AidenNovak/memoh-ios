@@ -39,6 +39,7 @@ export function ChatScreen() {
     chatFor,
     respondApproval,
     realtimeEnabled,
+    currentBot,
   } = useSession();
 
   // `new` 是一条真实的路由，但还没有会话 id；第一次发送时由服务端建会话。
@@ -59,6 +60,24 @@ export function ChatScreen() {
   const [draft, setDraft] = useState('');
   const turnsJson = useMemo(() => JSON.stringify(turns), [turns]);
 
+  /**
+   * 副标题：谁在说话 · 现在在干什么。
+   *
+   * 把"正在生成"放在这里，而不是在内容区挂一个悬浮胶囊——导航栏的副标题是系统里
+   * 传达这类状态的既有位置。
+   */
+  const subtitle = useMemo(() => {
+    // 不写嵌套三元（AGENTS.md 明确禁止）：可读性差且容易读反。
+    let who = '';
+    if (currentBot !== null) {
+      who = currentBot.display_name !== '' ? currentBot.display_name : currentBot.name;
+    }
+    let what = '';
+    if (chat.running) what = t('chat.thinking');
+    else if (chat.stale) what = t('chat.gap');
+    return [who, what].filter((part) => part !== '').join(' · ');
+  }, [chat.running, chat.stale, currentBot, t]);
+
   const onSend = useCallback(() => {
     const text = draft.trim();
     if (text === '') return;
@@ -73,6 +92,10 @@ export function ChatScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={0}
     >
+      {/*
+        导航栏：标题 + 副标题，不用"一条白底 + 一条生硬分隔线"把屏幕切成两块色。
+        副标题承担状态传达（谁 · 在干什么），这样生成中就不必在内容区再挂一个胶囊。
+      */}
       <View
         style={{
           paddingTop: insets.top,
@@ -80,6 +103,7 @@ export function ChatScreen() {
           paddingHorizontal: spacing.lg,
           flexDirection: 'row',
           alignItems: 'center',
+          gap: spacing.sm,
           borderBottomWidth: StyleSheet.hairlineWidth,
           borderBottomColor: palette.separator,
           backgroundColor: palette.card,
@@ -92,11 +116,17 @@ export function ChatScreen() {
           hitSlop={12}
           style={styles.back}
         >
-          <Text style={[typography.body, { color: palette.accent }]}>‹</Text>
+          {/* 系统蓝：导航是系统控件，品牌色克制使用。 */}
+          <Text style={[typography.title3, { color: '#007AFF' }]}>‹</Text>
         </Pressable>
-        <Text style={[typography.headline, { color: palette.label, flex: 1 }]} numberOfLines={1}>
-          {isNew ? t('home.newSession') : sessionTitle}
-        </Text>
+        <View style={{ flex: 1 }}>
+          <Text style={[typography.headline, { color: palette.label }]} numberOfLines={1}>
+            {isNew ? t('home.newSession') : sessionTitle}
+          </Text>
+          <Text style={[typography.caption, { color: palette.secondaryLabel }]} numberOfLines={1}>
+            {subtitle}
+          </Text>
+        </View>
         {chat.stale ? (
           <Text style={[typography.caption, { color: palette.warning }]}>{t('chat.gap')}</Text>
         ) : null}
@@ -117,23 +147,6 @@ export function ChatScreen() {
         emptyTitle={t('chat.empty.title')}
         emptyBody={t('chat.empty.body')}
       />
-
-      {chat.running ? (
-        <View style={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.sm }}>
-          <Pressable
-            accessibilityRole="button"
-            onPress={abort}
-            style={({ pressed }) => [
-              styles.stop,
-              { backgroundColor: palette.field, opacity: pressed ? 0.8 : 1 },
-            ]}
-          >
-            <Text style={[typography.subhead, { color: palette.destructive }]}>
-              {t('chat.stop')}
-            </Text>
-          </Pressable>
-        </View>
-      ) : null}
 
       <View
         style={{
@@ -160,24 +173,33 @@ export function ChatScreen() {
               flex: 1,
               color: palette.label,
               backgroundColor: palette.field,
-              borderRadius: 20,
+              // 半高圆角：36pt 高时是胶囊，长高了自然变成圆角矩形。
+              borderRadius: 18,
               paddingHorizontal: spacing.md,
               paddingTop: spacing.sm,
               paddingBottom: spacing.sm,
+              // 36pt 起步、最多 5 行左右。
               maxHeight: 120,
-              minHeight: 40,
+              minHeight: 36,
             },
           ]}
         />
+        {/*
+          生成中时**同一个位置**变成停止按钮，而不是在旁边多出一个悬浮胶囊。
+          用户的心智模型是"那个箭头的位置现在可以停"——在别处放一个红色胶囊
+          既不像系统控件，也遮挡内容。
+        */}
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={t('chat.send')}
-          disabled={draft.trim() === ''}
-          onPress={onSend}
+          accessibilityLabel={chat.running ? t('chat.stop') : t('chat.send')}
+          disabled={!chat.running && draft.trim() === ''}
+          onPress={chat.running ? abort : onSend}
           style={({ pressed }) => [
             styles.send,
             {
-              backgroundColor: draft.trim() === '' ? palette.field : palette.accent,
+              // 有文字（或正在生成）时是品牌色实心，否则是灰色——常灰会让人以为
+              // 按钮永远不可用。
+              backgroundColor: chat.running || draft.trim() !== '' ? palette.accent : palette.field,
               opacity: pressed ? 0.85 : 1,
             },
           ]}
@@ -185,10 +207,12 @@ export function ChatScreen() {
           <Text
             style={[
               typography.headline,
-              { color: draft.trim() === '' ? palette.tertiaryLabel : '#FFFFFF' },
+              {
+                color: chat.running || draft.trim() !== '' ? '#FFFFFF' : palette.tertiaryLabel,
+              },
             ]}
           >
-            ↑
+            {chat.running ? '■' : '↑'}
           </Text>
         </Pressable>
       </View>
@@ -211,11 +235,5 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  stop: {
-    alignSelf: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 16,
   },
 });
