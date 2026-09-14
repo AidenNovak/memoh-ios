@@ -29,10 +29,22 @@ import { usePalette, useTheme } from '../lib/theme/context.tsx';
 import type { SessionSeed } from '../features/session/store.tsx';
 
 /**
- * 默认地址。开发期指向本地隧道（见 README），生产由用户填自己的服务器。
- * 用常量而不是读构建变量：这是给自托管用户看的输入框默认值，不是配置项。
+ * 登录框的默认地址。
+ *
+ * 分两套，因为两种构建面对的"服务器"根本不是同一个：
+ *
+ * - **开发构建**（模拟器）：默认本地隧道 `http://127.0.0.1:18080`。模拟器跑在同一台
+ *   Mac 上，隧道就是它够得到 dev 栈的唯一方式。
+ * - **发布构建**（真机 / TestFlight）：默认 dev 栈的公网入口。真机够不着隧道，
+ *   而默认填 `127.0.0.1` 会让第一次打开 App 的人必然连不上——那看起来像 App 坏了，
+ *   实际上不是。填一个有 TLS 的真地址，装上去就能直接用。
+ *
+ * 仍然是"用户可以改的默认值"。Memoh 是自托管产品，谁都能填自己的服务器；这里
+ * 给的只是"我们那台能被公众访问的 dev 环境"，好让内测的人不用先拿到一台服务器。
  */
-const DEFAULT_SERVER = 'http://127.0.0.1:18080';
+const DEV_SERVER = 'http://127.0.0.1:18080';
+const PUBLIC_SERVER = 'https://memoh.yetodawn.com';
+const DEFAULT_SERVER = __DEV__ ? DEV_SERVER : PUBLIC_SERVER;
 
 export function LoginScreen({
   onSignedIn,

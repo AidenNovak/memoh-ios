@@ -36,12 +36,12 @@
 
 **隔离措施**（这台机器同时跑着生产「没猫饼」）：
 
-| 手段                 | 说明                                                       |
-| -------------------- | ---------------------------------------------------------- |
-| 端口只绑 127.0.0.1   | `docker-compose.override.yml` 里覆盖了 `ports`，公网不可达 |
-| 资源上限             | server 3 CPU / 3 GiB，postgres 1 GiB，其余更小             |
-| 独立 compose project | `memoh-dev`，与 `meimaobing-alpha` 的容器/网络/卷完全分开  |
-| 独立目录             | `/opt/memoh-dev`，不碰 `/opt/meimaobing-alpha`             |
+| 手段                 | 说明                                                                                            |
+| -------------------- | ----------------------------------------------------------------------------------------------- |
+| 端口只绑 127.0.0.1   | `docker-compose.override.yml` 里覆盖了 `ports`，默认公网不可达；真机需要时经第 4 节的公网入口进 |
+| 资源上限             | server 3 CPU / 3 GiB，postgres 1 GiB，其余更小                                                  |
+| 独立 compose project | `memoh-dev`，与 `meimaobing-alpha` 的容器/网络/卷完全分开                                       |
+| 独立目录             | `/opt/memoh-dev`，不碰 `/opt/meimaobing-alpha`                                                  |
 
 ## 一次性准备
 
@@ -94,6 +94,47 @@ pnpm dev:env:stop     # 关掉
 - Web UI `http://127.0.0.1:18082`（可以直接在浏览器里对照官方前端的行为）
 
 App 的登录页默认填的就是 `http://127.0.0.1:18080`。
+
+### 4. 公网入口（真机 / TestFlight 用）
+
+模拟器走隧道，但**手机上的包够不着隧道**。所以同一个 dev 栈还有一个公网入口：
+
+```
+https://memoh.yetodawn.com     （备用：memoh.yettodawn.com，同一张证书）
+```
+
+装它（在 vultr-sg 上，root）：
+
+```bash
+scp infra/vultr-sg/memoh-public-ingress.sh vultr-sg:/root/
+ssh vultr-sg "/root/memoh-public-ingress.sh install"
+ssh vultr-sg "/root/memoh-public-ingress.sh verify"   # HTTP 验收
+```
+
+前置是 DNS 记录（A → 本机公网 IP，**DNS-only**）与一张证书。证书用 DNS-01 签，
+因为这个域名的 DNS 在 Cloudflare、80 端口不保证可达：
+
+```bash
+certbot certonly --non-interactive --agree-tos --register-unsafely-without-email \
+  --authenticator dns-cloudflare \
+  --dns-cloudflare-credentials /root/.secrets/certbot/cloudflare.ini \
+  --dns-cloudflare-propagation-seconds 25 \
+  --cert-name memoh.yetodawn.com -d memoh.yetodawn.com -d memoh.yettodawn.com
+```
+
+它只暴露 `/opt/memoh-dev` 这一个栈，**不动服务端自己的鉴权**：除 `/auth/login`、
+`/health` 等少数端点外一律要 JWT；`/runtimes/connect` 要 bearer runtime key。
+`uninstall` 子命令能把公网入口摘掉、回到只绑 127.0.0.1。
+
+验收要连**实时通道**一起验，不只是"端口开着"：
+
+```bash
+ssh vultr-sg "node /root/public-ingress-probe.mjs --base https://memoh.yetodawn.com"
+```
+
+它登录 → 列 bot/会话 → 建 WebSocket → 发 `runtime_subscribe` → 等 `runtime_snapshot`。
+最后一步是关键：反代漏传 `Upgrade`/`Connection` 时握手还能成，但实时流是死的，
+而那在 App 上表现为"消息发出去、回复不出现"。
 
 ## 凭据放在哪
 
