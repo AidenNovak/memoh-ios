@@ -46,6 +46,8 @@ const config = ({ config }: ConfigContext): ExpoConfig => ({
       },
     ],
     './plugins/withLocales',
+    // hosted 单元测试 target（MemohKitTests），见 plugins/withKitTests.js
+    './plugins/withKitTests',
   ],
   experiments: {
     typedRoutes: true,

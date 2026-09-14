@@ -29,7 +29,8 @@
     "dev:env:stop": "./infra/local/memoh-tunnel.sh stop",
     "ternary:check": "pnpm --filter @memoh-ios/mobile ternary:check",
     "test:swift": "bash tools/run-logic-tests.sh",
-    "typecheck:kit": "bash tools/typecheck-kit.sh"
+    "typecheck:kit": "bash tools/typecheck-kit.sh",
+    "test:hosted": "bash tools/run-hosted-tests.sh"
   },
   "devDependencies": {
     "prettier": "^3.6.2",

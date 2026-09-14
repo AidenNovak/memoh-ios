@@ -56,6 +56,7 @@
 - UI 改动必须补/改 `apps/mobile/verification/ui` 里的行为检查，或复用已有的原生检查。共享控件要在每个受影响的宿主里都跑到。
 - **截图证视觉状态，录屏证时序行为。** 缺场景或超时判失败；只有截图不构成视觉正确的证据。
 - 本地检查不传 `--udid`，让脚本租一台 `Memoh * Verify` 模拟器；构建走 `pnpm verify:build`。用 `pnpm verify:simulator --name '<当前验收名>' -- <命令>` 包裹"构建 + 多检查"的流程，并用 `$MEMOH_VERIFY_UDID`。不要直接调 `simctl create`。
+- UIKit 那一半断言（cell 复用、颜色映射、无障碍）跑 `pnpm test:hosted`：config plugin `plugins/withKitTests.js` 在 prebuild 时注入 hosted 测试 target（宿主 = App，源码直接编进测试 bundle）。改 `modules/memoh-kit/ios/` 原生代码后，除了 `pnpm check` / `pnpm bundle` / 模拟器构建，还要跑它；`tools/run-hosted-tests.sh` 本地自建设备，CI 里走租约。
 - 「通过 56 个」不是结论，那 18 个失败才是信息。挂掉的用例必须给根因，没定论就写没定论。
 - 验收轮次落盘后不可修改。若后续发现上一轮结论不准确，**如实新增一轮并纠正**，不要回头改旧记录。
 - 怎么加一个 case、证据规则、结果目录与并行的约定都写在 `apps/mobile/verification/ui/README.md`；`pnpm verify:ui --list` 列出当前 case，`pnpm verify:native` 跑原生行为检查。

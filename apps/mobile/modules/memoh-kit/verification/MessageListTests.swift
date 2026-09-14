@@ -96,6 +96,9 @@ final class MessageListTests: XCTestCase {
   }
 
   func testStreamingFollowReadingAnchorAndReturnButton() async throws {
+    // 依赖 NativeMessageList（ExpoView，import ExpoModulesCore）：只有链接了
+    // MemohKit/ExpoModulesCore 的 hosted target 才能编译这条（见文件头注释）。
+    #if canImport(MemohKit)
     let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
     let controller = UIViewController()
     window.rootViewController = controller
@@ -152,6 +155,7 @@ final class MessageListTests: XCTestCase {
     list.setTurnsJSON("[]")
     try await settle()
     XCTAssertEqual(collection.numberOfItems(inSection: 0), 0)
+    #endif
   }
 
   /**
@@ -162,8 +166,9 @@ final class MessageListTests: XCTestCase {
    里那种灰占了 49% 的像素，整屏没有层级——所以这条不是形式主义。
    */
   func testActivitySurfaceDiffersFromUserBubble() {
-    let user = MessageBlockCell.color(for: MessageListMetrics.userSurface)
-    let activity = MessageBlockCell.color(for: MessageListMetrics.activitySurface)
+    let traits = UITraitCollection()
+    let user = MessageBlockCell.color(for: MessageListMetrics.userSurface, traits: traits)
+    let activity = MessageBlockCell.color(for: MessageListMetrics.activitySurface, traits: traits)
     XCTAssertNotEqual(user, activity, "两种表面映射到了同一种颜色——层级会在真实屏幕上消失")
     XCTAssertGreaterThan(user.cgColor.alpha, 0.9, "用户气泡必须是实心的：用户说的话是实体")
   }
@@ -210,9 +215,12 @@ final class MessageListTests: XCTestCase {
     cell.configure(group)
     let text = cell.heading.text
     let icon = cell.symbol.image
-    XCTAssertEqual(cell.heading.textColor, .secondaryLabel)
-    XCTAssertEqual(cell.symbol.tintColor, .secondaryLabel)
-    XCTAssertEqual(cell.spinner.color, .secondaryLabel)
+    // 状态色用 Memoh 品牌次标签色（暖灰 #6A6965），不是系统 .secondaryLabel——
+    // 这是品牌对齐后的设计决策（tokens.ts 与 MemohPalette.swift 两端一致）。
+    let expected = MemohPalette.secondaryLabel(cell.traitCollection)
+    XCTAssertEqual(cell.heading.textColor, expected)
+    XCTAssertEqual(cell.symbol.tintColor, expected)
+    XCTAssertEqual(cell.spinner.color, expected)
     XCTAssertTrue(cell.spinner.isAnimating)
     XCTAssertTrue(cell.body.isHidden)
     XCTAssertEqual(cell.accessibilityIdentifier, "message-block-m10")
@@ -223,12 +231,14 @@ final class MessageListTests: XCTestCase {
     cell.configure(try XCTUnwrap(MessageListLogicTests.toolGroups(cleanRows).first))
     XCTAssertEqual(cell.heading.text, text)
     XCTAssertEqual(cell.symbol.image, icon)
-    XCTAssertEqual(cell.heading.textColor, .secondaryLabel)
-    XCTAssertEqual(cell.symbol.tintColor, .secondaryLabel)
-    XCTAssertEqual(cell.spinner.color, .secondaryLabel)
+    XCTAssertEqual(cell.heading.textColor, expected)
+    XCTAssertEqual(cell.symbol.tintColor, expected)
+    XCTAssertEqual(cell.spinner.color, expected)
   }
 
   func testListGroupsToolsAndRefreshesWhenNonFirstToolFinishes() async throws {
+    // 同 testStreamingFollowReadingAnchorAndReturnButton：依赖 NativeMessageList。
+    #if canImport(MemohKit)
     let list = NativeMessageList(appContext: nil)
     list.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
     let blocks = #"[{"key":"a","kind":"tool","name":"exec","status":"done"},{"key":"b","kind":"tool","name":"fs_read","status":"running"}]"#
@@ -248,6 +258,7 @@ final class MessageListTests: XCTestCase {
     XCTAssertEqual(updated.accessibilityIdentifier, "message-block-a")
     XCTAssertEqual(updated.heading.text, text)
     XCTAssertFalse(updated.spinner.isAnimating)
+    #endif
   }
 }
 #endif

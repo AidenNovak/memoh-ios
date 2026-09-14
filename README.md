@@ -40,16 +40,17 @@ pnpm ios          # prebuild + pods + expo run:ios
 
 ## 常用命令
 
-| 命令                                      | 作用                                          |
-| ----------------------------------------- | --------------------------------------------- |
-| `pnpm start`                              | Metro（dev client）                           |
-| `pnpm ios`                                | prebuild + CocoaPods + 构建并安装到模拟器     |
-| `pnpm bundle`                             | 不发版的打包冒烟，验证 bundle 可产出          |
-| `pnpm check`                              | typecheck + i18n 校验 + 格式检查              |
-| `pnpm test`                               | 纯逻辑单测 + 验收基建自身的单测               |
-| `pnpm verify:build`                       | 构建 Debug 模拟器 App（产物路径给下游脚本用） |
-| `pnpm verify:ui`                          | 跑 UI 行为基线                                |
-| `pnpm verify:simulator --name X -- <cmd>` | 租一台模拟器跑命令，`$MEMOH_VERIFY_UDID` 可用 |
+| 命令                                      | 作用                                                         |
+| ----------------------------------------- | ------------------------------------------------------------ |
+| `pnpm start`                              | Metro（dev client）                                          |
+| `pnpm ios`                                | prebuild + CocoaPods + 构建并安装到模拟器                    |
+| `pnpm bundle`                             | 不发版的打包冒烟，验证 bundle 可产出                         |
+| `pnpm check`                              | typecheck + i18n 校验 + 格式检查                             |
+| `pnpm test`                               | 纯逻辑单测 + 验收基建自身的单测                              |
+| `pnpm test:hosted`                        | UIKit 断言跑在模拟器（hosted 测试 target，需 prebuild+pods） |
+| `pnpm verify:build`                       | 构建 Debug 模拟器 App（产物路径给下游脚本用）                |
+| `pnpm verify:ui`                          | 跑 UI 行为基线                                               |
+| `pnpm verify:simulator --name X -- <cmd>` | 租一台模拟器跑命令，`$MEMOH_VERIFY_UDID` 可用                |
 
 ## 文档
 
