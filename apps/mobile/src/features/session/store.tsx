@@ -29,6 +29,7 @@ import { MemohRealtime, type ConnectionState } from '../../api/realtime.ts';
 import { canOpenRealtime, type Bot, type Session as MemohSession } from '../../api/types.ts';
 import type { QueueItem } from '../../models/chat.ts';
 import { uuid } from '../../lib/uuid.ts';
+import { sessionSourceParts } from './sourceLabel.ts';
 import {
   composerActionWithSupport,
   QueueSubmissionGate,
@@ -298,7 +299,10 @@ export function SessionProvider({
         id: item.id,
         title: item.title,
         updatedAt: item.updated_at,
-        source: [item.channel_type, item.type].filter((part) => part !== '').join(' · '),
+        // 只拼确实有内容的字段：这台部署服务端不返回 channel_type，
+        // 原来那条 `filter(part => part !== '')` 会保留 undefined，副标题渲染成
+        // " · chat"（开头一个空段）。规则见 features/session/sourceLabel.ts。
+        source: sessionSourceParts({ channelType: item.channel_type, type: item.type }).join(' · '),
       }));
       dispatch({ type: 'sessions', sessions });
     } catch (error) {

@@ -19,6 +19,7 @@ import { GROUP_INSET, radius } from '../lib/theme/tokens.ts';
 import { usePalette, useTheme } from '../lib/theme/context.tsx';
 import { useSession, type SessionSummary } from '../features/session/store.tsx';
 import { sessionDisplayTitle } from '../features/session/displayTitle.ts';
+import { sessionSourceLabel } from '../features/session/sourceLabel.ts';
 import {
   useSessionActivity,
   type SessionActivity,
@@ -281,9 +282,14 @@ function SessionRow({
             {formatRelative(session.updatedAt)}
           </Text>
         </View>
-        <Text style={[typography.footnote, { color: palette.secondaryLabel }]} numberOfLines={1}>
-          {session.source}
-        </Text>
+        {/* 副标题没有内容就整行不渲染：渲染一个空 Text 会白占一行高度，
+            而"空"是这台部署上的常态（服务端不返回 channel_type，只剩 type）。
+            实测过它渲染成 " · chat" 的样子——一个空段加一个多余分隔符。 */}
+        {sessionSourceLabel(session) !== '' ? (
+          <Text style={[typography.footnote, { color: palette.secondaryLabel }]} numberOfLines={1}>
+            {sessionSourceLabel(session)}
+          </Text>
+        ) : null}
       </View>
       {!last ? (
         <View
