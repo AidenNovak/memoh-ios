@@ -55,11 +55,17 @@ class MessageBlockCell: UICollectionViewCell {
 
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-  func style(_ label: UILabel, _ textStyle: UIFont.TextStyle, color: UIColor = .label) {
+  /**
+   给 label 上字体与颜色。
+   
+   `color` 传 `nil` 表示"品牌正文色"——不能把 `MemohPalette.label(traitCollection)`
+   写成默认参数，因为默认参数在编译期求值，拿不到当前 trait。
+   */
+  func style(_ label: UILabel, _ textStyle: UIFont.TextStyle, color: UIColor? = nil) {
     label.font = .preferredFont(forTextStyle: textStyle)
     label.adjustsFontForContentSizeCategory = true
     label.numberOfLines = 0
-    label.textColor = color
+    label.textColor = color ?? MemohPalette.label(traitCollection)
   }
 
   private func updateWidth() {
@@ -74,43 +80,41 @@ class MessageBlockCell: UICollectionViewCell {
   /**
    机器活动的容器样式。
    
-   ⚠️ **刻意不用 `.secondarySystemBackground`**：那个灰正好等于用户气泡的灰，
-   于是"我说的话"和"agent 干的事"长得一模一样。实测
-   （`verification/ui/tools/measure_surfaces.py`）在一张工具场景截图里，同一种灰
-   占了 49% 的像素——整屏是一片同色的板子，没有层级。
+   ⚠️ 这个表面必须与**用户气泡**不同色。曾经两者都是同一个系统灰，实测
+   （`verification/ui/tools/measure_surfaces.py`）一张工具场景截图里那种灰占了
+   49% 的像素——整屏是一片同色的板子，没有层级。
    
-   改用 `.tertiarySystemBackground`，它在两套外观下各给一个合适的形态：
+   现在两者的区分有两层，任一层单独成立：
    
-   - **浅色**：等于页面白，于是这张卡片只剩一圈描边 —— "描边容器"；
-   - **深色**：比页面亮一档，是一块浮起的面 —— "浮起容器"。
+   - **色相**：用户气泡是品牌紫派生的淡紫（`MemohPalette.userBubble`），
+     这里的中性下沉面（`MemohPalette.activitySurface`）一点紫都不带；
+   - **形态**：用户气泡是实心块，这里是带描边的容器。
    
-   两种外观下它都和用户气泡（`.secondarySystemBackground`）**不同**，于是层级变成：
-   实心 = 你说的话，描边/浮起 = agent 干的事。区分靠形态，不靠第三个灰阶——
-   浅色模式里根本没有第三个能和页面分开的灰。
+   用中性下沉面而不是"描边白"，是因为 Memoh 的页面底本身是暖白 `#FAF8F7`，
+   卡片白 `#FFFFFF` 与它的差别在手机上几乎看不出来，纯靠描边会显得单薄。
    */
-  func card(border: UIColor = .separator) {
-    stack.backgroundColor = MessageBlockCell.color(for: MessageListMetrics.activitySurface)
+  func card(border: UIColor? = nil) {
+    stack.backgroundColor = MessageBlockCell.color(for: MessageListMetrics.activitySurface, traits: traitCollection)
     stack.directionalLayoutMargins = .init(top: 14, leading: 16, bottom: 14, trailing: 16)
-    borderColor = border
+    borderColor = border ?? MemohPalette.separator(traitCollection)
     stack.layer.borderWidth = 1
-    stack.layer.borderColor = border.resolvedColor(with: traitCollection).cgColor
+    stack.layer.borderColor = borderColor.resolvedColor(with: traitCollection).cgColor
   }
 
   /**
    语义表面 → 具体颜色。**唯一**的转换点，两边取值必须不同。
    
-   `.tertiarySystemBackground` 在浅色下等于页面白（于是卡片只剩一圈描边）、
-   在深色下比页面亮一档（一块浮起的面）；两套外观下都和用户气泡的
-   `.secondarySystemBackground` 不同，所以"谁在说话"始终分得开。
+   政策在 `SurfaceToken`（Foundation-only，可单测），这里只负责把它落到 UIColor。
    */
-  static func color(for surface: SurfaceToken) -> UIColor {
+  static func color(for surface: SurfaceToken, traits: UITraitCollection) -> UIColor {
     switch surface {
-    case .secondary: return .secondarySystemBackground
-    case .tertiary: return .tertiarySystemBackground
+    case .secondary: return MemohPalette.userBubble(traits)
+    case .tertiary: return MemohPalette.activitySurface(traits)
     }
   }
 
-  func setHeading(_ text: String?, symbol name: String? = nil, color: UIColor = .label) {
+  func setHeading(_ text: String?, symbol name: String? = nil, color: UIColor? = nil) {
+    let color = color ?? MemohPalette.label(traitCollection)
     heading.text = text
     heading.textColor = color
     header.isHidden = text?.isEmpty != false
@@ -123,7 +127,7 @@ class MessageBlockCell: UICollectionViewCell {
   func configure(_ row: TranscriptRow) {
     user = row.id.role == "user"
     updateWidth()
-    stack.backgroundColor = user ? MessageBlockCell.color(for: MessageListMetrics.userSurface) : .clear
+    stack.backgroundColor = user ? MessageBlockCell.color(for: MessageListMetrics.userSurface, traits: traitCollection) : .clear
     stack.directionalLayoutMargins = .init(top: 12, leading: 16, bottom: 12, trailing: 16)
     if !user { stack.directionalLayoutMargins = .init(top: 4, leading: 0, bottom: 4, trailing: 0) }
     borderColor = .clear
@@ -209,8 +213,8 @@ final class ReasoningMessageCell: MessageBlockCell {
   func configure(_ row: TranscriptRow, expanded: Bool) {
     super.configure(row)
     card()
-    setHeading(MemohStrings.text("Reasoning"), symbol: "text.bubble", color: .secondaryLabel)
-    style(body, .callout, color: .secondaryLabel)
+    setHeading(MemohStrings.text("Reasoning"), symbol: "text.bubble", color: MemohPalette.secondaryLabel(traitCollection))
+    style(body, .callout, color: MemohPalette.secondaryLabel(traitCollection))
     body.numberOfLines = MessageListMetrics.reasoningLineLimit(expanded: expanded)
     body.lineBreakMode = .byTruncatingTail
     let action = MemohStrings.text(expanded ? "Collapse reasoning" : "Expand reasoning")
@@ -255,7 +259,7 @@ final class ToolMessageCell: MessageBlockCell {
   override init(frame: CGRect) {
     super.init(frame: frame)
     header.alignment = .center
-    style(heading, .footnote, color: .secondaryLabel)
+    style(heading, .footnote, color: MemohPalette.secondaryLabel(traitCollection))
     heading.lineBreakMode = .byWordWrapping
     // Reserve the trailing slot even when stopped: completion must not reflow the text.
     let spinnerSlot = UIView()
@@ -275,9 +279,12 @@ final class ToolMessageCell: MessageBlockCell {
 
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-  static func color(for foreground: ToolActivityGroup.Foreground) -> UIColor {
+  static func color(
+    for foreground: ToolActivityGroup.Foreground, traits: UITraitCollection
+  ) -> UIColor {
     switch foreground {
-    case .secondary: return .secondaryLabel
+    // 工具活动行是**过程**，用次要文字色——它不是结论，不该和正文抢。
+    case .secondary: return MemohPalette.secondaryLabel(traits)
     }
   }
 
@@ -290,7 +297,7 @@ final class ToolMessageCell: MessageBlockCell {
     stack.layer.borderWidth = 0
     stack.directionalLayoutMargins = .init(top: 4, leading: 0, bottom: 4, trailing: 0)
     body.isHidden = true
-    let foreground = Self.color(for: group.foreground)
+    let foreground = Self.color(for: group.foreground, traits: traitCollection)
     style(heading, .footnote, color: foreground)
     setHeading(group.text, symbol: group.symbolName, color: foreground)
     spinner.color = foreground
@@ -316,7 +323,7 @@ final class ErrorMessageCell: MessageBlockCell {
 
   override init(frame: CGRect) {
     super.init(frame: frame)
-    style(code, .subheadline, color: .secondaryLabel)
+    style(code, .subheadline, color: MemohPalette.secondaryLabel(traitCollection))
     stack.addArrangedSubview(code)
   }
 
@@ -324,8 +331,9 @@ final class ErrorMessageCell: MessageBlockCell {
 
   override func configure(_ row: TranscriptRow) {
     super.configure(row)
-    card(border: .systemRed)
-    setHeading(MemohStrings.text("Error"), symbol: "exclamationmark.octagon.fill", color: .systemRed)
+    card(border: MemohPalette.destructive(traitCollection))
+    setHeading(MemohStrings.text("Error"), symbol: "exclamationmark.octagon.fill",
+               color: MemohPalette.destructive(traitCollection))
     code.text = row.block.code.flatMap { $0.isEmpty ? nil : MemohStrings.text("Error code") + ": " + $0 }
     code.isHidden = code.text == nil
     updateAccessibility(row, content: [heading.text, body.text, code.text])
@@ -335,8 +343,8 @@ final class ErrorMessageCell: MessageBlockCell {
 final class NoticeMessageCell: MessageBlockCell {
   override func configure(_ row: TranscriptRow) {
     super.configure(row)
-    setHeading(MemohStrings.text("Notice"), symbol: "info.circle", color: .secondaryLabel)
-    style(body, .callout, color: .secondaryLabel)
+    setHeading(MemohStrings.text("Notice"), symbol: "info.circle", color: MemohPalette.secondaryLabel(traitCollection))
+    style(body, .callout, color: MemohPalette.secondaryLabel(traitCollection))
     updateAccessibility(row, content: [heading.text, body.text])
   }
 }
@@ -375,7 +383,7 @@ final class AttachmentsMessageCell: MessageBlockCell {
       line.spacing = 12
       let icon = UIImageView(image: UIImage(systemName: item.symbolName))
       icon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(font: .preferredFont(forTextStyle: .title3))
-      icon.tintColor = .secondaryLabel
+      icon.tintColor = MemohPalette.secondaryLabel(traitCollection)
       icon.contentMode = .scaleAspectFit
       icon.setContentHuggingPriority(.required, for: .horizontal)
       icon.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -386,7 +394,7 @@ final class AttachmentsMessageCell: MessageBlockCell {
       style(name, .body)
       name.text = item.name.isEmpty ? MemohStrings.text("Untitled attachment") : item.name
       let size = UILabel()
-      style(size, .subheadline, color: .secondaryLabel)
+      style(size, .subheadline, color: MemohPalette.secondaryLabel(traitCollection))
       size.text = item.formattedSize ?? MemohStrings.text("Size unknown")
       details.addArrangedSubview(name)
       details.addArrangedSubview(size)

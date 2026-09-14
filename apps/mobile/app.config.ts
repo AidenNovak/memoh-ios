@@ -36,8 +36,11 @@ const config = ({ config }: ConfigContext): ExpoConfig => ({
     [
       'expo-splash-screen',
       {
-        backgroundColor: '#FFFFFF',
-        dark: { backgroundColor: '#000000' },
+        // 启动屏底色用 Memoh 的页面底（暖白/近黑），与 App 内第一屏背景**同色**。
+        // 用纯白的话，冷启动时能看到"启动屏白 → App 暖白"的一次跳色。
+        // 值来自 tools/oklch.py，与 tokens.ts 的 background 一致。
+        backgroundColor: '#FAF8F7',
+        dark: { backgroundColor: '#060606' },
         image: './assets/images/splash-icon.png',
         imageWidth: 120,
       },

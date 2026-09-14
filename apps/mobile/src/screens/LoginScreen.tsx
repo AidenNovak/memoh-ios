@@ -18,6 +18,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ApiError, MemohClient } from '../api/client.ts';
@@ -116,23 +117,16 @@ export function LoginScreen({
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
       >
-        {/* 品牌标记。Lody 的引导页在这里放 app icon（64×64，连续圆角）。
-            我们没有图标资源，用一个文字标记代替——重点是**给这一屏一个视觉锚点**，
-            否则「大标题 + 两个输入框」看起来像没做完。 */}
-        <View
-          style={{
-            width: 64,
-            height: 64,
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: palette.accent,
-            alignSelf: 'center',
-            marginBottom: spacing.xxl,
-            ...radiusStyle(15),
-          }}
-        >
-          <Text style={{ color: palette.onAccent, fontSize: 28, fontWeight: '700' }}>M</Text>
-        </View>
+        {/* 品牌标记：Memoh 的水母 logo。
+            和桌面端登录页一样用**裸 logo**（它在 Web 上就是 size-14 直接放的，
+            没有底色方块），所以这里也不加背景色——加了会变成一个"图标按钮"，
+            而它不是可点的。 */}
+        <Image
+          source={require('../../assets/images/brand-mark.png')}
+          style={{ width: 64, height: 64, alignSelf: 'center', marginBottom: spacing.xxl }}
+          contentFit="contain"
+          accessibilityIgnoresInvertColors
+        />
 
         <Text
           style={[

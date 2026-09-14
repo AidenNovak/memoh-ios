@@ -36,6 +36,7 @@ SDK="$(xcrun --sdk iphonesimulator --show-sdk-path)"
 
 sources=(
   "$KIT/Support/MemohStrings.swift"
+  "$KIT/Support/MemohPalette.swift"
   "$KIT/Chat/Transcript.swift"
   "$KIT/Chat/MessageCells.swift"
 )

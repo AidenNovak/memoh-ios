@@ -63,6 +63,49 @@ const SCHEMES = [
   ['oled', paletteFor('oled', 'dark')],
 ];
 
+/**
+ * 品牌色的**唯一真源**是 Memoh 桌面端（`@felinic/ui` 的 `style.css`）。
+ *
+ * 这些值由 `tools/oklch.py` 从 oklch 转出来。写成断言是为了防止"手滑改回去"：
+ * 一旦有人在这里手改一个"看起来更顺眼"的紫，两端就不是同一个产品了。
+ * 要改请改那个脚本，再同步过来。
+ */
+const MEMOH_BRAND = {
+  light: '#764BE5',
+  dark: '#A490FF',
+};
+
+const MEMOH_BACKGROUND = {
+  // 暖白 + 暖黑。这是 Memoh 视觉身份的一部分，不是"随便挑的白"。
+  light: '#FAF8F7',
+  dark: '#060606',
+};
+
+test('品牌色与桌面端一致', () => {
+  assert.equal(
+    paletteFor('light', 'light').accent,
+    MEMOH_BRAND.light,
+    '浅色品牌色必须与桌面端 --brand 一致（改颜色请改 tools/oklch.py）',
+  );
+  assert.equal(
+    paletteFor('dark', 'dark').accent,
+    MEMOH_BRAND.dark,
+    '深色品牌色必须与桌面端 --brand 一致',
+  );
+});
+
+test('背景是 Memoh 的暖白/近黑，不是纯白/纯黑', () => {
+  // 这条看着吹毛求疵，其实是"两端像不像一个产品"的关键：
+  // 纯白配紫会冷，暖白配紫才是桌面端那个感觉。
+  assert.equal(paletteFor('light', 'light').background, MEMOH_BACKGROUND.light);
+  assert.equal(paletteFor('dark', 'dark').background, MEMOH_BACKGROUND.dark);
+  assert.notEqual(
+    paletteFor('light', 'light').card,
+    paletteFor('light', 'light').background,
+    '卡片与页面底必须不同色，否则卡片浮不起来又没有阴影可用',
+  );
+});
+
 test('accent 在每种外观下都满足 4.5:1', () => {
   for (const [name, palette] of SCHEMES) {
     for (const background of [palette.background, palette.groupedBackground, palette.card]) {

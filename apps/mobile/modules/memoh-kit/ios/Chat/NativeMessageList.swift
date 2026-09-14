@@ -53,8 +53,10 @@ final class NativeMessageList: ExpoView, UICollectionViewDelegate {
     }
     collection = MessageCollectionView(frame: .zero, collectionViewLayout: layout)
     super.init(appContext: appContext)
-    backgroundColor = .systemBackground
-    collection.backgroundColor = .systemBackground
+    // 品牌页面底（暖白/近黑），不是 iOS 的系统白/黑。
+    // 用系统色的话，这个原生列表和它上下的 RN 界面（已用品牌色）会拼成两种温度的白。
+    backgroundColor = MemohPalette.background(traitCollection)
+    collection.backgroundColor = MemohPalette.background(traitCollection)
     collection.delegate = self
     collection.alwaysBounceVertical = true
     collection.keyboardDismissMode = .interactive

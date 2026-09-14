@@ -1,31 +1,43 @@
 /**
- * 主题底座。
+ * 主题底座 —— **对齐 Memoh 桌面端**的品牌 token。
  *
- * ## 设计来源
+ * ## 这份文件的来源
  *
- * 这一版按 `docs/research/lody-design-spec.md`（一个成熟 iOS AI 客户端的设计系统）
- * 重写。三条原则：
+ * 所有颜色都取自桌面端的唯一色值源：`@felinic/ui` 的 `src/style.css`
+ * （`packages/ui` 是个 git submodule）。桌面端用 **OKLCH** 定义颜色——那是给浏览器的
+ * （相对颜色语法、感知均匀调色），而 React Native 不认识 oklch，只吃 `#RRGGBB`。
  *
- * 1. **用 iOS 语义色，不用 Web 的 hex。** Web 那套 token 是给浏览器和
- *    Inter/MiSans 调的；搬到 iOS 上会显得"不是原生"。系统语义色自带明暗切换、
- *    对比度适配、无障碍反转。
+ * 转换在 `tools/oklch.py` 里做，那里同时保留了"哪个 token 对应什么用途"的对照表。
+ * **改颜色请改那个脚本再同步过来**，不要在这里手改——手改一次，两边就再也对不上了。
  *
- * 2. **少而明确的角色，而不是一堆字号。** Lody 全部排版只有六个角色
- *    （title / body / secondary / meta / eyebrow / mono），业务代码不出现裸字号。
- *    角色越少，界面越一致——"每个页面看起来是同一个 App"就是这么来的。
+ * ## 与"直接用 iOS 语义色"的区别
  *
- * 3. **行高必须显式给。** iOS 系统行高比 `fontSize * 1.2` 宽（正文 17pt 配 25pt
- *    行高）。不给行高，密集段落会挤在一起，这是"看起来业余"最常见的原因之一。
+ * 前一版按 iOS 惯例用了 `#FFFFFF` / `#000000` / `systemBackground` 那套。这一版改用
+ * Memoh 自己的颜色，因为**品牌一致性**比"iOS 默认观感"更重要：用户在桌面端认得的
+ * 是暖白的 `#FAF8F7`、暖黑的 `#191816`、以及那个紫色 `#764BE5`。用系统灰会让两个端
+ * 看起来像两个产品。
  *
- * ## 与 Lody 的差异（有意为之）
+ * ## 排版仍保留 iOS 的阶梯
  *
- * - **保留 Memoh 的紫色强调**，不换成 Lody 的靛蓝——用户在 Web 端认得这个颜色。
- *   但**取了一个更深的值**：原来的 `#7C5CFF` 在浅色下对白底只有 4.35:1、
- *   对分组底 3.89:1，都不满足 4.5:1。现在是 `#6B4AE8`（5.57 / 4.99）。
- *   `theme_test.mjs` 会守住这条，别再改回去。
- * - **深色背景默认纯黑**（Lody 默认 `#111113` 柔和黑）。这是自托管产品的选择：
- *   省电、对比强，且 `oled` 模式本来就是我们的一个显式选项。
+ * 角色名对齐桌面端的语义角色，但字号用 iOS 的（正文 17pt 而不是 15px）——手机的
+ * 可视距离更近，这是平台差异不是不一致。行高一律显式给：iOS 系统行高比
+ * `fontSize * 1.2` 宽，不给会让多段文字挤在一起。
+ *
+ * ## 三处刻意的偏离，都有理由
+ *
+ * 1. **深色下压在品牌色上的文字用深墨而不是白。**
+ *    桌面端 `--brand-foreground` 是近白色（`#FAFAFB`），压在深色品牌色
+ *    `#A490FF` 上只有 **2.51:1**。但桌面端**自己的**深色高强调按钮
+ *    `--btn-primary: oklch(0.976 0 0)` 恰恰是"浅填充 + 深墨"（16.56:1）。
+ *    把同一套逻辑用到品牌填充上：`#191816` 压 `#A490FF` = **6.77:1**。
+ *    既守着他们的深色哲学，又可读。
+ * 2. **`success` 用系统绿。** Memoh 的颜色体系里没有"在线/成功"这一档
+ *    （`--chart-2` 是绿色但那是图表色）。这个语义只有 iOS 需要。
+ * 3. **`overlay` 保留 iOS 的遮罩浓度。** 桌面端没有 sheet 遮罩这个概念。
+ *
+ * `tests/theme.test.mjs` 会把这些约束钉住——包括上面三处的例外也要达标。
  */
+
 /** 主题模式：跟随系统 / 强制浅色 / 强制深色 / 深色下用纯黑。 */
 export type AppearanceMode = 'system' | 'light' | 'dark' | 'oled';
 
@@ -33,121 +45,127 @@ export type AppearanceMode = 'system' | 'light' | 'dark' | 'oled';
 export type SystemScheme = 'light' | 'dark' | null | undefined;
 
 export interface Palette {
-  /** 页面背景（分组列表的底）。 */
+  /** 页面底。桌面端 `--background`：暖白，不是纯白。 */
   background: string;
-  /** 分组容器的背景。 */
+  /** 分组容器/侧栏底。桌面端 `--background-chrome`，比页面低一档。 */
   groupedBackground: string;
-  /** 卡片/行的背景。 */
+  /** 卡片底。桌面端 `--card`：纯白，浮在暖白页面上。 */
   card: string;
-  /**
-   * 阅读面（对话页、消息流）的背景。
-   *
-   * 和 `background` 分开是有原因的：分组列表要 `#F2F2F7` 才能让白卡片浮起来，
-   * 而消息流是**连续阅读**，白底更安静。深色下两者相同。
-   */
+  /** 阅读面（对话页消息流）。与 `background` 同色——连续阅读时白底更安静。 */
   reading: string;
-  /** 主文本。 */
+  /** 正文。桌面端 `--foreground`：暖黑。 */
   label: string;
-  /** 次要文本（副标题、说明、时间）。 */
+  /** 次要文字。桌面端 `--muted-foreground`。 */
   secondaryLabel: string;
-  /** 三级文本（装饰性，不承载必要信息）。 */
+  /** 三级文字。桌面端没有这一档，由 `muted-foreground` 再降一档得到。 */
   tertiaryLabel: string;
-  /** 占位文本。 */
+  /** 占位文字。与 `tertiaryLabel` 同值。 */
   placeholder: string;
-  /** 分隔线。 */
+  /** 描边与分隔线。桌面端 `--border`。 */
   separator: string;
-  /** 动作强调色。**唯一非系统色**。 */
+  /** 品牌色。桌面端 `--brand`。**唯一强调色**。 */
   accent: string;
-  /**
-   * 强调色上的文字色。
-   *
-   * 单独给一个角色而不是到处写 `#FFFFFF`：强调色一旦换成浅色（比如深色模式的
-   * 淡紫），白字就不可读了。让"压在强调色上的文字"永远从这一处取。
-   */
+  /** 压在品牌色上的文字。见文件头第 1 条偏离。 */
   onAccent: string;
-  /** 危险动作 / 错误。 */
+  /** 品牌色的淡底（选中态、淡标签）。桌面端 `--brand-soft`。 */
+  accentSoft: string;
+  /** 品牌色的描边。桌面端 `--brand-border`。 */
+  accentBorder: string;
+  /** 品牌色按下态。桌面端 `--brand-hover`。 */
+  accentPressed: string;
+  /** 危险动作/错误。桌面端 `--destructive`。 */
   destructive: string;
-  /** 成功 / 在线。**只用于状态点，不用于文字**（对白底仅 2.2:1）。 */
+  /** 成功/在线。**iOS 专用**，见文件头第 2 条偏离。只用于状态点。 */
   success: string;
   /** 警告。 */
   warning: string;
-  /** 输入框背景。 */
+  /** 输入框/下沉面。桌面端 `--muted`。 */
   field: string;
-  /**
-   * 下沉面（chip、代码块、用户气泡底）。
-   *
-   * 语义是"比周围低一层"，与 `field` 的区别是它不承载输入。
-   */
+  /** 下沉 chip。与 `field` 同值，语义上区分"不承载输入"。 */
   inset: string;
-  /** 覆盖层（sheet 后面的遮罩）。 */
+  /** 用户消息气泡底。桌面端由品牌色派生（`oklch(from var(--brand) …)`）。 */
+  userBubble: string;
+  /** 用户气泡上的文字。 */
+  userBubbleForeground: string;
+  /** 覆盖层（sheet 后面的遮罩）。iOS 专用，见文件头第 3 条偏离。 */
   overlay: string;
 }
 
 /**
- * iOS 语义色的实际取值。
+ * 浅色。取值 = `tools/oklch.py` 输出的 hex。
  *
- * 这些与 `UIColor.systemBackground` 等一致。写死是因为 RN 的 `PlatformColor`
- * 在动画与插值场景里行为不一致，而在浅/深两档下单值就够了——真需要系统动态色
- * 时用 `PlatformColor`。
+ * 注意 `background` 是 **#FAF8F7**（暖白）而不是 #FFFFFF——这是 Memoh 视觉身份的一部分，
+ * 也是"和桌面端对齐"最容易被忽略的一处。卡片才是纯白，于是卡片自然浮起来，不需要阴影。
  */
 const light: Palette = {
-  background: '#FFFFFF',
-  groupedBackground: '#F2F2F7',
+  background: '#FAF8F7',
+  groupedBackground: '#F8F6F5',
   card: '#FFFFFF',
-  reading: '#FFFFFF',
-  label: '#000000',
-  secondaryLabel: '#3C3C4399',
-  tertiaryLabel: '#3C3C434D',
-  placeholder: '#3C3C434D',
-  separator: '#3C3C4336',
-  accent: '#6B4AE8',
-  onAccent: '#FFFFFF',
-  destructive: '#FF3B30',
+  reading: '#FAF8F7',
+  label: '#191816',
+  secondaryLabel: '#6A6965',
+  tertiaryLabel: '#A3A19D',
+  placeholder: '#A3A19D',
+  separator: '#E5E2E0',
+  accent: '#764BE5',
+  onAccent: '#FAFAFB',
+  accentSoft: '#F1EFFF',
+  accentBorder: '#C9C2FC',
+  accentPressed: '#6731D6',
+  destructive: '#E7000B',
   success: '#34C759',
-  warning: '#FF9500',
-  field: '#7676801F',
-  inset: '#F5F5F5',
+  warning: '#B25E00',
+  field: '#F4F4F4',
+  inset: '#F4F4F4',
+  userBubble: '#EEE5FE',
+  userBubbleForeground: '#22192E',
   overlay: '#00000066',
 };
 
+/**
+ * 深色。桌面端 `.dark` 块。
+ *
+ * `background` 是 `oklch(0.12212 0 0)`（近黑）而不是纯黑——桌面端深色不是纯黑，
+ * 卡片 `#181818` 浮在它上面。
+ */
 const dark: Palette = {
-  background: '#000000',
-  groupedBackground: '#000000',
-  card: '#1C1C1E',
-  reading: '#000000',
-  label: '#FFFFFF',
-  secondaryLabel: '#EBEBF599',
-  tertiaryLabel: '#EBEBF54D',
-  placeholder: '#EBEBF54D',
-  separator: '#54545899',
-  // 深色 accent：比原来的 #9C85FF 深一档。
-  //
-  // 原因是**白字压在强调色上**这件事。原来的值配白字只有 2.91:1，连"大字号
-  // 3:1"都不到——而按钮文字正是压在强调色上的。现在 3.61:1，与 Apple 自己的
-  // systemBlue 填色按钮（#0A84FF 配白字 = 3.65:1）齐平。
-  //
-  // 这是深色模式下强调色的固有张力：要够亮才在黑底上看得见，又要够暗才能压白字。
-  // 取值为基色-亮度的折中，与系统同档。
-  accent: '#8B72F5',
-  onAccent: '#FFFFFF',
-  destructive: '#FF453A',
+  background: '#060606',
+  groupedBackground: '#060606',
+  card: '#181818',
+  reading: '#060606',
+  label: '#DEDEDE',
+  secondaryLabel: '#9E9E9E',
+  tertiaryLabel: '#6B6B6B',
+  placeholder: '#6B6B6B',
+  separator: '#FFFFFF14',
+  accent: '#A490FF',
+  // 见文件头第 1 条偏离：深墨压浅品牌色 = 6.77:1，与桌面端深色 CTA 同一套逻辑。
+  onAccent: '#191816',
+  accentSoft: '#2E274E73',
+  accentBorder: '#A490FF59',
+  accentPressed: '#B7A5FF',
+  destructive: '#FF6467',
   success: '#30D158',
   warning: '#FF9F0A',
-  field: '#7676803D',
-  inset: '#1C1C1E',
+  field: '#242424',
+  inset: '#242424',
+  userBubble: '#532D8D',
+  userBubbleForeground: '#FFFFFF',
   overlay: '#00000099',
 };
 
 /**
- * 真黑模式：深色下的背景用纯黑。
+ * 真黑模式：用户显式选择时背景用纯黑。
  *
- * 这是设计基线里明确要的一个设置项——纯黑省电，但看久了累，所以由用户决定，
- * 不替他们决定。
+ * 这是我们自己加的一档（桌面端没有——浏览器不需要为 OLED 省电）。桌面端深色本来
+ * 就够暗（`#060606`），所以这一档只把卡片再压暗一点，让"纯黑"这个选项名副其实。
  */
 const oled: Palette = {
   ...dark,
-  card: '#0A0A0A',
+  background: '#000000',
   groupedBackground: '#000000',
+  reading: '#000000',
+  card: '#131313',
 };
 
 export function paletteFor(mode: AppearanceMode, systemScheme: SystemScheme): Palette {
@@ -185,8 +203,8 @@ export const GROUP_INSET = 16;
 /**
  * 圆角。全部配 `borderCurve: 'continuous'`（见 `radiusStyle`）。
  *
- * 数值对齐 Lody 的那一套，因为它们是"看起来像 iOS"的一部分：
- * 系统连续圆角在同样半径下比普通圆角更饱满，观感差别明显。
+ * 基准对齐桌面端的 `--radius`（0.625rem = 10px），并按 iOS 的观感放大——同样半径下，
+ * iOS 的连续圆角比 Web 的普通圆角更饱满。
  */
 export const radius = {
   sm: 6,
@@ -214,19 +232,16 @@ export function radiusStyle(value: number) {
 /**
  * 排版角色。
  *
- * **六个核心角色**（对齐 Lody，业务代码优先用这些）：
- *   title    20/26 600  分区标题、页面标题
+ * 六个核心角色：
+ *   title    22/28 700  分区标题、页面标题
  *   body     17/25 400  正文、列表主标题、输入框
  *   secondary 15/21 400 副标题、说明
  *   meta     13/18 400  时间、状态、脚注
  *   eyebrow  11/14 600  全大写小标签
  *   mono     13/20 mono 路径、命令、ID、代码（**只有这四类**）
  *
- * 另有三个在 iOS 体系里必要的补充：`largeTitle`（登录页的品牌标题）、
- * `headline`（行主标题需要强调时）、`caption`（12pt，介于 meta 与 eyebrow）。
- *
- * 行高是显式给的，不是算出来的：iOS 系统行高比 `fontSize * 1.2` 宽，
- * 正文 17pt 配 25pt 行高。不给行高，多段文字会挤在一起。
+ * 另有三个在 iOS 体系里必要的补充：`largeTitle`（品牌标题）、`headline`
+ * （行主标题需要强调时）、`caption`（12pt，介于 meta 与 eyebrow）。
  */
 export const typography = {
   largeTitle: { fontSize: 34, lineHeight: 41, fontWeight: '700' as const, letterSpacing: 0.37 },
@@ -253,12 +268,7 @@ export const typography = {
 /** 触控目标下限。低于这个值就是错的。 */
 export const MIN_TOUCH_TARGET = 44;
 
-/**
- * 分组列表的行内边距。
- *
- * 左边 16 是卡片内边距；有图标时图标占位 20 + 间距 12，文字起点因此落在 48。
- * 分隔线的左缩进要与文字起点对齐（而不是通栏），这是原生列表的标志性细节。
- */
+/** 分组列表的行内边距。 */
 export const ROW_PADDING = {
   top: 10,
   bottom: 10,

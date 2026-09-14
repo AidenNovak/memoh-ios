@@ -294,11 +294,13 @@ def run_case_script(case, directory, context, appearance=None):
     # 把本轮分配的外观告诉 case。
     #
     # 编排器本身按外观循环（`execute_run` 里 `for appearance in appearances`），
-    # 所以 case **只应该跑这一个外观**。之前没传这个参数，于是像 `scenes`/`pages`
-    # 这种「自己也会遍历两种外观」的 case 每次都被跑两遍——同一份工作做了两次，
+    # 所以 case **只应该跑这一个外观**。之前没传这个信息，于是像 `scenes`/`pages`
+    # 这种「自己也会遍历两种外观」的 case 每次都被完整跑两遍——同一份工作做两次，
     # 而且两个分片并行时会同时抢模拟器，表现为 `simctl launch timed out`。
-    if appearance is not None:
-        command.extend(['--appearance', appearance])
+    #
+    # 走**环境变量**而不是命令行参数：每个 case 的 argparse 是它自己的契约，
+    # 编排器往里塞一个它们没声明的 flag 会让所有既有 case（包括测试里的 stub）
+    # 直接以 "unrecognized arguments" 退出。环境变量不改变任何既有契约。
     environment = {
         **os.environ,
         'MEMOH_UI_UDID': context.udid,

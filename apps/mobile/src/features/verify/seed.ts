@@ -63,12 +63,12 @@ export function watchVerifyNavigation(
   onChange: (target: string) => void,
 ): () => void {
   if (!__DEV__) return () => {};
-  const describe = (seed: VerifySeed): string =>
-    seed.scenario === 'scene' && typeof seed.scene === 'string'
-      ? `scene:${seed.scene}`
-      : seed.scenario === 'route' && typeof seed.path === 'string'
-        ? `route:${seed.path}`
-        : '';
+  /** 把种子里的导航意图描述成一个可比较的字符串（`scene:<id>` / `route:<path>`）。 */
+  const describe = (seed: VerifySeed): string => {
+    if (seed.scenario === 'scene' && typeof seed.scene === 'string') return `scene:${seed.scene}`;
+    if (seed.scenario === 'route' && typeof seed.path === 'string') return `route:${seed.path}`;
+    return '';
+  };
   let last = describe(initial);
 
   const timer = setInterval(() => {
