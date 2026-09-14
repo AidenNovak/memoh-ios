@@ -254,6 +254,9 @@ final class ReasoningMessageCell: MessageBlockCell {
 
 final class ToolMessageCell: MessageBlockCell {
   let spinner = UIActivityIndicatorView(style: .medium)
+  let disclosure = UIButton(type: .system)
+  var onToggle: (() -> Void)?
+  let detailStack = UIStackView()
   override var headingTextStyle: UIFont.TextStyle { .footnote }
 
   override init(frame: CGRect) {
@@ -275,6 +278,29 @@ final class ToolMessageCell: MessageBlockCell {
     spinner.hidesWhenStopped = true
     spinner.isAccessibilityElement = false
     header.addArrangedSubview(spinnerSlot)
+
+    // 展开箭头（详情流）。与 ReasoningMessageCell 同一套模式：cell 是单个
+    // VoiceOver 元素，动作通过 custom action 暴露，箭头本身不可聚焦。
+    var configuration = UIButton.Configuration.plain()
+    configuration.contentInsets = .zero
+    configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(textStyle: .footnote)
+    disclosure.configuration = configuration
+    disclosure.tintColor = .systemBlue
+    disclosure.isAccessibilityElement = false
+    disclosure.addTarget(self, action: #selector(toggle), for: .touchUpInside)
+    disclosure.setContentHuggingPriority(.required, for: .horizontal)
+    header.addArrangedSubview(disclosure)
+
+    // 展开后的详情容器：下沉面 + 圆角（对应上游 Capsule），但**不自己滚动**——
+    // 过程体必须跟着主聊天滚动（memoh-desktop-parity.md §4.3）。
+    detailStack.axis = .vertical
+    detailStack.spacing = 10
+    detailStack.isLayoutMarginsRelativeArrangement = true
+    detailStack.directionalLayoutMargins = .init(top: 10, leading: 12, bottom: 10, trailing: 12)
+    detailStack.layer.cornerRadius = 12
+    detailStack.layer.cornerCurve = .continuous
+    detailStack.isHidden = true
+    stack.addArrangedSubview(detailStack)
   }
 
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -290,7 +316,9 @@ final class ToolMessageCell: MessageBlockCell {
 
   override func configure(_ row: TranscriptRow) { configure(ToolActivityGroup(row)) }
 
-  func configure(_ group: ToolActivityGroup) {
+  func configure(_ group: ToolActivityGroup) { configure(group, expanded: false) }
+
+  func configure(_ group: ToolActivityGroup, expanded: Bool) {
     super.configure(group.first)
     // This is an activity sentence, not a card. No status badge or error-colored detail.
     stack.backgroundColor = .clear
@@ -306,15 +334,124 @@ final class ToolMessageCell: MessageBlockCell {
     } else {
       spinner.stopAnimating()
     }
-    // No tap affordance until the details flow exists. The first block's identifier stays
-    // stable; every member's name (including repeated names) remains available to VoiceOver.
-    accessibilityValue = group.showsSpinner ? MemohStrings.text("Running") : nil
+
+    if group.expandable {
+      renderDetail(group)
+      detailStack.isHidden = !expanded
+      var configuration = disclosure.configuration
+      configuration?.image = UIImage(systemName: expanded ? "chevron.up" : "chevron.down")
+      disclosure.configuration = configuration
+      disclosure.isHidden = false
+      let action = MemohStrings.text(expanded ? "Collapse details" : "Expand details")
+      accessibilityValue = MemohStrings.text(expanded ? "Expanded" : "Collapsed")
+      accessibilityHint = action
+      accessibilityCustomActions = [UIAccessibilityCustomAction(name: action, target: self, selector: #selector(toggle))]
+    } else {
+      detailStack.isHidden = true
+      disclosure.isHidden = true
+      accessibilityValue = group.showsSpinner ? MemohStrings.text("Running") : nil
+      accessibilityHint = nil
+      accessibilityCustomActions = nil
+    }
+    // The first block's identifier stays stable; every member's name (including
+    // repeated names) remains available to VoiceOver.
     updateAccessibility(group.first, content: [group.text] + group.accessibilityDescriptions.map { Optional($0) })
   }
+
+  /** 重建展开内容：每个成员一个块（名字 · 位置 · 耗时 / 输入条目 / 诊断）。 */
+  private func renderDetail(_ group: ToolActivityGroup) {
+    detailStack.backgroundColor = MessageBlockCell.color(for: MessageListMetrics.activitySurface, traits: traitCollection)
+    for view in detailStack.arrangedSubviews { view.removeFromSuperview() }
+    for row in group.rows {
+      detailStack.addArrangedSubview(memberDetail(row))
+    }
+  }
+
+  private func memberDetail(_ row: TranscriptRow) -> UIStackView {
+    let block = row.block
+    let container = UIStackView()
+    container.axis = .vertical
+    container.spacing = 4
+    container.alignment = .fill
+
+    // 成员头：名字 · 执行位置 · 耗时（服务端给了才显示，不伪造）。
+    var meta = [block.name?.isEmpty == false ? block.name! : MemohStrings.text("Tool")]
+    if let location = block.location, !location.isEmpty { meta.append(location) }
+    if let durationMs = block.durationMs, durationMs > 0 { meta.append(Self.formatDuration(durationMs)) }
+    let metaLabel = UILabel()
+    style(metaLabel, .footnote, color: MemohPalette.secondaryLabel(traitCollection))
+    metaLabel.text = meta.joined(separator: " · ")
+    container.addArrangedSubview(metaLabel)
+
+    // 输入条目：key 次要色 / value 正文色（R2 评审第 3 项，对应上游 generic detail）。
+    for entry in block.input?.entries ?? [] {
+      container.addArrangedSubview(inputRow(key: entry.key, value: entry.value))
+    }
+
+    // 诊断：失败用危险红（标题保持中性——失败不是任务失败，见 ToolResultDiagnosis）。
+    let diagnosis = ToolResultDiagnosis.read(block.output)
+    if let text = diagnosis.text, !text.isEmpty {
+      let color = diagnosis.isError
+        ? MemohPalette.destructive(traitCollection)
+        : MemohPalette.label(traitCollection)
+      container.addArrangedSubview(monoLabel(text, color: color))
+    } else if let error = block.error, !error.isEmpty {
+      container.addArrangedSubview(monoLabel(error, color: MemohPalette.destructive(traitCollection)))
+    }
+    return container
+  }
+
+  private func inputRow(key: String, value: String) -> UIStackView {
+    let row = UIStackView()
+    row.axis = .horizontal
+    row.spacing = 8
+    row.alignment = .firstBaseline
+    let keyLabel = monoLabel(key, color: MemohPalette.secondaryLabel(traitCollection))
+    keyLabel.setContentHuggingPriority(.required, for: .horizontal)
+    keyLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+    let valueLabel = monoLabel(value, color: MemohPalette.label(traitCollection))
+    valueLabel.lineBreakMode = .byCharWrapping
+    valueLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    row.addArrangedSubview(keyLabel)
+    row.addArrangedSubview(valueLabel)
+    return row
+  }
+
+  private func monoLabel(_ text: String, color: UIColor) -> UILabel {
+    let label = UILabel()
+    label.font = UIFontMetrics(forTextStyle: .footnote)
+      .scaledFont(for: .monospacedSystemFont(ofSize: 13, weight: .regular))
+    label.adjustsFontForContentSizeCategory = true
+    label.numberOfLines = 0
+    label.textColor = color
+    label.text = text
+    label.isAccessibilityElement = false
+    return label
+  }
+
+  static func formatDuration(_ ms: Double) -> String {
+    if ms >= 1000 { return String(format: "%.1fs", ms / 1000) }
+    return "\(Int(ms))ms"
+  }
+
+  @objc private func toggle() -> Bool {
+    guard let onToggle else { return false }
+    onToggle()
+    return true
+  }
+
+  override func accessibilityActivate() -> Bool { toggle() }
 
   override func prepareForReuse() {
     super.prepareForReuse()
     spinner.stopAnimating()
+    onToggle = nil
+    disclosure.configuration?.image = nil
+    disclosure.isHidden = true
+    detailStack.isHidden = true
+    for view in detailStack.arrangedSubviews { view.removeFromSuperview() }
+    accessibilityHint = nil
+    accessibilityCustomActions = nil
   }
 }
 

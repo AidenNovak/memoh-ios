@@ -16,13 +16,15 @@ final class MessageListTests: XCTestCase {
     tool.configure(failed)
     // 聚合行只显示活动措辞；原始名字、入参与诊断留在无障碍内容里。
     XCTAssertEqual(tool.heading.text, MemohStrings.text("Ran commands"))
-    XCTAssertNil(tool.accessibilityValue)
+    // 有详情（这里是 error）的可展开工具，无障碍值表达**展开态**而非状态词。
+    XCTAssertEqual(tool.accessibilityValue, MemohStrings.text("Collapsed"))
     XCTAssertNotNil(tool.symbol.image)
     XCTAssertTrue(tool.accessibilityLabel?.contains("pytest") == true)
     XCTAssertTrue(tool.accessibilityLabel?.contains("Permission denied") == true)
     let done = try XCTUnwrap(TranscriptRow.decode(MessageListLogicTests.transcript(
       #"[{"key":"tool","kind":"tool","name":"exec","status":"done"}]"#)).first)
     tool.configure(done)
+    // 无详情、非运行的块不贴任何词（完成不宣布，见 R2 评审 §2b）。
     XCTAssertNil(tool.accessibilityValue, "完成态不贴状态词")
     XCTAssertFalse(tool.symbol.isHidden, "类型图标不是成功标记，完成时仍保留")
     XCTAssertFalse(tool.accessibilityLabel?.contains("Permission denied") == true)
@@ -234,6 +236,99 @@ final class MessageListTests: XCTestCase {
     XCTAssertEqual(cell.heading.textColor, expected)
     XCTAssertEqual(cell.symbol.tintColor, expected)
     XCTAssertEqual(cell.spinner.color, expected)
+  }
+
+  func testToolCardExpansionLayersInputAndKeepsNeutralHeading() throws {
+    // 输入条目：key 次要色 / value 正文色（R2 第 3 项）；失败诊断用危险红；
+    // 标题保持中性，不因 isError 染色；耗时只在服务端给了才显示。
+    let blocks = #"[{"key":"a","kind":"tool","name":"exec","status":"done","location":"workspace","durationMs":1500,"input":{"command":"pytest -q","cwd":"/tmp"}},{"key":"b","kind":"tool","name":"fs_read","status":"done","input":{"path":"a.txt"},"output":{"isError":true,"content":[{"type":"text","text":"Permission denied"}]}}]"#
+    let rows = try TranscriptRow.decode(MessageListLogicTests.transcript(blocks))
+    let group = try XCTUnwrap(MessageListLogicTests.toolGroups(rows).first)
+    XCTAssertTrue(group.expandable, "有输入条目 + 失败诊断，应该可展开")
+    let cell = ToolMessageCell(frame: .zero)
+    cell.configure(group, expanded: true)
+    XCTAssertFalse(cell.detailStack.isHidden, "展开后详情容器必须可见")
+    XCTAssertFalse(cell.disclosure.isHidden, "可展开的工具必须有箭头")
+    // 标题与箭头都保持中性（失败不染色）。
+    let expected = MemohPalette.secondaryLabel(cell.traitCollection)
+    XCTAssertEqual(cell.heading.textColor, expected)
+    // 详情内容：成员块里应能找到输入条目（key muted / value fg）与红色诊断。
+    let memberBlocks = cell.detailStack.arrangedSubviews.compactMap { $0 as? UIStackView }
+    XCTAssertEqual(memberBlocks.count, 2, "两个成员各一个块")
+    // 输入行是横向 stack（key/value 两个 label），要递归一层才能拿到。
+    let allLabels = memberBlocks.flatMap { block in
+      block.arrangedSubviews.flatMap { view -> [UILabel] in
+        if let row = view as? UIStackView {
+          return row.arrangedSubviews.compactMap { $0 as? UILabel }
+        }
+        return [view].compactMap { $0 as? UILabel }
+      }
+    }
+    let keyLabels = allLabels.filter { $0.text == "command" || $0.text == "cwd" || $0.text == "path" }
+    XCTAssertEqual(keyLabels.count, 3, "输入条目的 key 应该渲染出来")
+    for key in keyLabels {
+      XCTAssertEqual(key.textColor, expected, "key 用次要色")
+    }
+    let redDiagnosis = allLabels.filter { $0.text?.contains("Permission denied") == true }
+    XCTAssertEqual(redDiagnosis.count, 1, "失败诊断要渲染出来")
+    XCTAssertEqual(redDiagnosis[0].textColor, MemohPalette.destructive(cell.traitCollection), "诊断用危险红")
+    XCTAssertTrue(allLabels.contains { $0.text?.contains("1.5s") == true }, "服务端给了耗时就要显示")
+    // 折叠后详情收起、箭头仍在（可再展开）。
+    cell.configure(group, expanded: false)
+    XCTAssertTrue(cell.detailStack.isHidden)
+    XCTAssertFalse(cell.disclosure.isHidden)
+  }
+
+  func testToolCardDisclosureTogglesAndExposesVoiceOverAction() throws {
+    let blocks = #"[{"key":"a","kind":"tool","name":"exec","status":"done","input":{"command":"pytest"}},{"key":"b","kind":"tool","name":"fs_read","status":"done","input":{"path":"a.txt"}}]"#
+    let rows = try TranscriptRow.decode(MessageListLogicTests.transcript(blocks))
+    let group = try XCTUnwrap(MessageListLogicTests.toolGroups(rows).first)
+    let cell = ToolMessageCell(frame: .zero)
+    cell.configure(group)
+    XCTAssertEqual(cell.accessibilityCustomActions?.count, 1, "可展开的工具要暴露 custom action")
+    var toggles = 0
+    cell.onToggle = { toggles += 1 }
+    cell.disclosure.sendActions(for: .touchUpInside)
+    XCTAssertEqual(toggles, 1, "点箭头要触发 onToggle")
+    cell.prepareForReuse()
+    XCTAssertNil(cell.onToggle)
+    XCTAssertNil(cell.accessibilityCustomActions)
+  }
+
+  func testToolCardNotExpandableWhileRunning() throws {
+    let blocks = #"[{"key":"a","kind":"tool","name":"exec","status":"running","input":{"command":"pytest"}}]"#
+    let rows = try TranscriptRow.decode(MessageListLogicTests.transcript(blocks))
+    let group = try XCTUnwrap(MessageListLogicTests.toolGroups(rows).first)
+    XCTAssertFalse(group.expandable, "运行中不可展开——参数可能还在流")
+    let cell = ToolMessageCell(frame: .zero)
+    cell.configure(group, expanded: true)
+    XCTAssertTrue(cell.disclosure.isHidden, "运行中不显示箭头")
+    XCTAssertTrue(cell.detailStack.isHidden, "运行中不渲染详情")
+  }
+
+  func testToolExpansionStateTogglesAndRetains() {
+    let id = TranscriptRow.ID(turn: "t", message: "m", role: "user", block: "b", kind: .tool)
+    var state = ToolExpansionState()
+    XCTAssertFalse(state.isExpanded(id))
+    state.toggle(id)
+    XCTAssertTrue(state.isExpanded(id), "toggle 之后应该展开")
+    state.toggle(id)
+    XCTAssertFalse(state.isExpanded(id), "再 toggle 应该收起")
+    state.toggle(id)
+    state.retain([TranscriptRow.ID(turn: "t", message: "m", role: "user", block: "gone", kind: .tool)])
+    XCTAssertFalse(state.isExpanded(id), "retain 只保留现存 id")
+  }
+
+  func testToolInputEntriesExposeFlatScalarPairs() throws {
+    // entries 只摊平标量对象；嵌套/数组退回空（视觉分层只服务真正可读的键值）。
+    let flat = try XCTUnwrap(TranscriptRow.decode(MessageListLogicTests.transcript(
+      #"[{"key":"t","kind":"tool","name":"exec","input":{"command":"pytest -q","cwd":"/tmp","flag":true}}]"#)).first)
+    let entries = try XCTUnwrap(flat.block.input?.entries)
+    XCTAssertEqual(entries.map(\.key), ["command", "cwd", "flag"], "按 key 排序")
+    XCTAssertEqual(entries.map(\.value), ["pytest -q", "/tmp", "true"])
+    let nested = try XCTUnwrap(TranscriptRow.decode(MessageListLogicTests.transcript(
+      #"[{"key":"t","kind":"tool","name":"exec","input":{"command":{"shell":"bash","args":["-c","pwd"]}}}]"#)).first)
+    XCTAssertTrue(nested.block.input?.entries.isEmpty == true, "嵌套对象不摊平")
   }
 
   func testListGroupsToolsAndRefreshesWhenNonFirstToolFinishes() async throws {

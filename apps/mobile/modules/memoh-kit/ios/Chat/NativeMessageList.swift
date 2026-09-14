@@ -35,6 +35,7 @@ final class NativeMessageList: ExpoView, UICollectionViewDelegate {
   private var lastSize = CGSize.zero
   private var decodeFailed = false
   private var expansion = ReasoningExpansionState()
+  private var toolExpansion = ToolExpansionState()
   private var expansionUpdates = Set<TranscriptRow.ID>()
   private var readingAnchor: (TranscriptRow.ID, CGFloat)?
   private var interactionRevision = 0
@@ -77,7 +78,8 @@ final class NativeMessageList: ExpoView, UICollectionViewDelegate {
       guard let self, let row = self.rows[id] else { return nil }
       let cell = collection.dequeueReusableCell(withReuseIdentifier: id.kind.rawValue, for: path)
       if case .tools(let group) = row, let tool = cell as? ToolMessageCell {
-        tool.configure(group)
+        tool.configure(group, expanded: self.toolExpansion.isExpanded(id))
+        tool.onToggle = { [weak self] in self?.toggleTool(id) }
       } else if let reasoning = cell as? ReasoningMessageCell {
         reasoning.configure(row.first, expanded: self.expansion.isExpanded(id))
         reasoning.onToggle = { [weak self] in self?.toggleReasoning(id) }
@@ -197,6 +199,7 @@ final class NativeMessageList: ExpoView, UICollectionViewDelegate {
     let anchor = visibleAnchor()
     let revision = interactionRevision
     expansion.retain(ids)
+    toolExpansion.retain(ids)
     expansionUpdates.removeAll()
     readingAnchor = nil
     rows = next
@@ -234,6 +237,15 @@ final class NativeMessageList: ExpoView, UICollectionViewDelegate {
     // Expanding content is an explicit reading action, even if the list was following.
     beginReading()
     expansion.toggle(id)
+    expansionUpdates.insert(id)
+    refreshExpansionIfNeeded()
+  }
+
+  private func toggleTool(_ id: TranscriptRow.ID) {
+    guard rows[id]?.id.kind == .tool else { return }
+    // 展开/收起工具详情是显式阅读动作，即使列表正在跟随也要停。
+    beginReading()
+    toolExpansion.toggle(id)
     expansionUpdates.insert(id)
     refreshExpansionIfNeeded()
   }

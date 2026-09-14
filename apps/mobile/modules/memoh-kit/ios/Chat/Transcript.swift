@@ -134,6 +134,26 @@ indirect enum ToolInput: Codable, Equatable, Sendable {
     }
   }
 
+  /**
+   把扁平对象摊平成 `(key, value)` 条目，供 cell 做**键值分层**渲染
+   （key 用次要色、value 用正文色，对应上游 `tool-call-detail-generic.vue` 的
+   `flex` 行）。
+
+   与 `preview`（整段字符串）互补：预览给无障碍，条目给视觉。过滤空值
+   （上游 filter 掉 `undefined/null/''`）。嵌套或数组没有条目——那种情况
+   交给 `preview` 的紧凑 JSON。
+   */
+  var entries: [(key: String, value: String)] {
+    if case .object(let fields) = self, !fields.isEmpty,
+       fields.values.allSatisfy(\.isScalar) {
+      return fields.keys.sorted().compactMap { key in
+        guard let value = fields[key]?.scalarText, !value.isEmpty else { return nil }
+        return (key, value)
+      }
+    }
+    return []
+  }
+
   var scalarText: String {
     switch self {
     case .string(let value): return value
@@ -216,6 +236,20 @@ struct ReasoningExpansionState {
 
   mutating func toggle(_ id: TranscriptRow.ID) {
     guard id.kind == .reasoning else { return }
+    if !expanded.insert(id).inserted { expanded.remove(id) }
+  }
+
+  mutating func retain(_ ids: [TranscriptRow.ID]) { expanded.formIntersection(ids) }
+}
+
+/// 工具卡展开状态的容器：与 reasoning 同一套纯用户驱动、跨刷新持久化语义。
+struct ToolExpansionState {
+  private var expanded = Set<TranscriptRow.ID>()
+
+  func isExpanded(_ id: TranscriptRow.ID) -> Bool { expanded.contains(id) }
+
+  mutating func toggle(_ id: TranscriptRow.ID) {
+    guard id.kind == .tool else { return }
     if !expanded.insert(id).inserted { expanded.remove(id) }
   }
 
@@ -511,6 +545,24 @@ struct ToolActivityGroup: Equatable, Sendable {
   // One neutral policy for every state, including isError. A tool result is not a run verdict.
   enum Foreground: Sendable { case secondary }
   var foreground: Foreground { .secondary }
+
+  /**
+   有没有可以展开的详情（对应上游 `expandable`：有 detail 组件 / 显式
+   expandable / 结果 isError 时为真）。运行中不可展开——参数可能还在流，
+   展开内容会跳。
+
+   不伪造：只有服务端真给了 input 条目、诊断正文或 error 才算有详情。
+   */
+  var expandable: Bool {
+    guard !showsSpinner else { return false }
+    return rows.contains { row in
+      let block = row.block
+      if block.input?.entries.isEmpty == false { return true }
+      if let error = block.error, !error.isEmpty { return true }
+      if let text = ToolResultDiagnosis.read(block.output).text, !text.isEmpty { return true }
+      return false
+    }
+  }
 
   var accessibilityDescriptions: [String] {
     rows.map { row in
