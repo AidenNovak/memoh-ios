@@ -50,4 +50,25 @@ xcrun -sdk iphonesimulator swiftc \
   -sdk "$SDK" \
   "${sources[@]}"
 
+# 新增文件必须同步进 Pods 工程，否则**真机构建会找不到**，而上面这几行类型检查发现
+# 不了——它是显式列文件的，绕过了 Xcode 的工程文件列表。
+#
+# 踩过：加了 `MemohPalette.swift`，typecheck 通过、构建报
+# "cannot find 'MemohPalette' in scope"（Pods 缓存的文件清单里没有它）。
+# 所以这里加一道检查：把 `ios/` 下的 Swift 文件与 Pods 工程里记录的对比。
+if [[ -f "$ROOT/apps/mobile/ios/Pods/Pods.xcodeproj/project.pbxproj" ]]; then
+  missing=()
+  while IFS= read -r file; do
+    name="$(basename "$file")"
+    if ! grep -q "\b${name%.swift}\b" "$ROOT/apps/mobile/ios/Pods/Pods.xcodeproj/project.pbxproj"; then
+      missing+=("$name")
+    fi
+  done < <(find "$KIT" -name '*.swift')
+  if (( ${#missing[@]} > 0 )); then
+    echo "⚠️  这些文件不在 Pods 工程里：${missing[*]}" >&2
+    echo "    跑一下 pnpm pods（apps/mobile），否则真机构建会报 cannot find in scope。" >&2
+    exit 1
+  fi
+fi
+
 echo "类型检查通过（不含 NativeMessageList.swift：见文件头注释）"

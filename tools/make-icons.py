@@ -99,11 +99,15 @@ def check_brand_colors(image):
         )
 
 
-def place(logo, size, background, ratio=0.62):
+def place(logo, size, background, ratio=0.72):
     """把 logo 居中放进正方形画布，四周留白。
 
-    留白比例参考 Apple 的图标网格：内容约占 62%，四周留安全边距。
-    贴边会让图标在小尺寸下显得臃肿，而且 iOS 会裁掉圆角区域。
+    `ratio` 约束的是**较长的那一边**（这份 logo 宽大于高，1024×902）。
+
+    取 0.72 而不是 Apple 网格常说的 0.62–0.70：这份 logo 宽高比是 1.14，按宽度算
+    0.62 时高度只剩 55%，在小尺寸下视觉重量明显偏轻。0.72 让内容占到 72% 宽 ×
+    63% 高，与常见图标标记的观感一致，同时左右各留 14% 安全边距——
+    水母最宽处在竖直中段，不会被 iOS 的圆角遮罩切到。
     """
     canvas = Image.new('RGBA', (size, size), background)
     graphic = trim(logo.copy())
