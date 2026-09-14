@@ -22,6 +22,7 @@ import { usePalette, useTheme } from '../lib/theme/context.tsx';
 import { ApprovalSheet } from '../ui/ApprovalSheet.tsx';
 import { composerActionWithSupport } from '../features/chat/queue.ts';
 import { QueueStrip } from '../ui/QueueStrip.tsx';
+import { SessionInfoSheet } from '../ui/SessionInfoSheet.tsx';
 import { UserInputSheet } from '../ui/UserInputSheet.tsx';
 
 export function ChatScreen() {
@@ -49,6 +50,8 @@ export function ChatScreen() {
     respondUserInput,
     realtimeEnabled,
     currentBot,
+    sessionStatusFor,
+    refreshSessionStatus,
   } = useSession();
 
   // `new` 是一条真实的路由，但还没有会话 id；第一次发送时由服务端建会话。
@@ -70,6 +73,8 @@ export function ChatScreen() {
 
   const [draft, setDraft] = useState('');
   const queue = queueFor(isNew ? '' : sessionId);
+  const [infoOpen, setInfoOpen] = useState(false);
+  const sessionStatus = sessionStatusFor(isNew ? '' : sessionId);
 
   /**
    运行中按钮的语义（与上游同一个圆按钮一致，见 chat-pane 的 handleSendButton）：
@@ -119,6 +124,12 @@ export function ChatScreen() {
     return [who, what].filter((part) => part !== '').join(' · ');
   }, [chat.running, chat.stale, currentBot, t]);
 
+  /** 打开会话信息面板。先刷新一次——面板里的数字是"现在的"，不该是进会话时的。 */
+  const openInfo = useCallback(() => {
+    setInfoOpen(true);
+    if (!isNew) void refreshSessionStatus(sessionId);
+  }, [isNew, refreshSessionStatus, sessionId]);
+
   const onSend = useCallback(() => {
     const text = draft.trim();
     if (text === '') return;
@@ -161,14 +172,22 @@ export function ChatScreen() {
           {/* 系统蓝：导航是系统控件，品牌色克制使用。 */}
           <Text style={[typography.title3, { color: '#007AFF' }]}>‹</Text>
         </Pressable>
-        <View style={{ flex: 1 }}>
+        {/* 标题即入口：点它看会话信息（设计基线里"标题可点=会话信息"）。
+            iOS 上这是常规做法——导航栏标题承载上下文，而不是另设一个按钮。 */}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('sessionInfo.open')}
+          accessibilityHint={t('sessionInfo.title')}
+          onPress={openInfo}
+          style={({ pressed }) => ({ flex: 1, opacity: pressed ? 0.6 : 1 })}
+        >
           <Text style={[typography.headline, { color: palette.label }]} numberOfLines={1}>
             {isNew ? t('home.newSession') : sessionTitle}
           </Text>
           <Text style={[typography.caption, { color: palette.secondaryLabel }]} numberOfLines={1}>
             {subtitle}
           </Text>
-        </View>
+        </Pressable>
         {chat.stale ? (
           <Text style={[typography.caption, { color: palette.warning }]}>{t('chat.gap')}</Text>
         ) : null}
@@ -313,6 +332,14 @@ export function ChatScreen() {
         userInput={chat.userInput}
         onSubmit={(answers) => respondUserInput({ answers })}
         onCancel={() => respondUserInput({ canceled: true })}
+      />
+
+      <SessionInfoSheet
+        visible={infoOpen}
+        status={sessionStatus}
+        loading={false}
+        error={null}
+        onClose={() => setInfoOpen(false)}
       />
     </KeyboardAvoidingView>
   );

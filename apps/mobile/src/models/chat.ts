@@ -91,6 +91,30 @@ export interface ApprovalChoice {
 }
 
 /**
+ * `GET …/status` 的响应。
+ *
+ * 字段全部可选：**部署版本决定给多少**。这台部署（memohai/server 8/30 镜像）
+ * 实测只给 `used_tokens`；上游较新的版本还会给 `context_window`、`budget_plan`
+ * （输出预留、自动压缩阈值）与 `compaction`。界面要能在两种形状下都说得对——
+ * 尤其**没有窗口时不能说"用了百分之多少"**，那是编出来的数。
+ */
+export interface SessionStatus {
+  message_count?: number;
+  context_usage?: {
+    used_tokens?: number;
+    context_window?: number;
+    budget_plan?: { window?: number; output_reserve?: number };
+    compaction?: { enabled?: boolean; auto_tokens?: number };
+  };
+  cache_stats?: {
+    cache_read_tokens?: number;
+    total_input_tokens?: number;
+    cache_hit_rate?: number;
+  };
+  skills?: { id?: string; name?: string }[];
+}
+
+/**
  * 会话队列里的一条待发消息（服务端持有，客户端只显示与操作）。
  *
  * 两条队列共用一个读取形状（上游 `SessionQueueItem` 也是这么合并的）：

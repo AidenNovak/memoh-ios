@@ -27,7 +27,7 @@ import { AppState as RNAppState } from 'react-native';
 import { ApiError, MemohClient } from '../../api/client.ts';
 import { MemohRealtime, type ConnectionState } from '../../api/realtime.ts';
 import { canOpenRealtime, type Bot, type Session as MemohSession } from '../../api/types.ts';
-import type { QueueItem } from '../../models/chat.ts';
+import type { QueueItem, SessionStatus } from '../../models/chat.ts';
 import { uuid } from '../../lib/uuid.ts';
 import { sessionSourceParts } from './sourceLabel.ts';
 import {
@@ -89,6 +89,8 @@ interface UiState {
   chats: Record<string, ChatState>;
   /** sessionId → 待发队列（服务端持有的 follow-up / steer）。 */
   queues: Record<string, QueueView>;
+  /** sessionId → 会话信息（消息数 / 上下文用量 / cache）。 */
+  sessionStatus: Record<string, SessionStatus>;
   currentSessionId: string | null;
   connection: ConnectionState;
   error: string | null;
@@ -139,6 +141,7 @@ type Action =
   | { type: 'closeSession' }
   | { type: 'chat'; sessionId: string; update: (chat: ChatState) => ChatState }
   | { type: 'queue'; sessionId: string; view: QueueView }
+  | { type: 'sessionStatus'; sessionId: string; status: SessionStatus }
   | { type: 'connection'; state: ConnectionState }
   | { type: 'error'; message: string | null };
 
@@ -151,6 +154,7 @@ const initialState: UiState = {
   sessionsLoading: false,
   chats: {},
   queues: {},
+  sessionStatus: {},
   currentSessionId: null,
   connection: 'idle',
   error: null,
@@ -191,6 +195,11 @@ function reducer(state: UiState, action: Action): UiState {
     }
     case 'queue':
       return { ...state, queues: { ...state.queues, [action.sessionId]: action.view } };
+    case 'sessionStatus':
+      return {
+        ...state,
+        sessionStatus: { ...state.sessionStatus, [action.sessionId]: action.status },
+      };
     case 'connection':
       return { ...state, connection: action.state };
     case 'error':
@@ -231,6 +240,10 @@ interface SessionContextValue {
   submit: (text: string) => Promise<SubmitResult>;
   /** 某个会话的待发队列（没有就是空队列）。 */
   queueFor: (sessionId: string) => QueueView;
+  /** 某个会话的信息（消息数 / 上下文用量 / cache）。null = 还没取到。 */
+  sessionStatusFor: (sessionId: string) => SessionStatus | null;
+  /** 主动刷一次会话信息（打开面板前调）。 */
+  refreshSessionStatus: (sessionId: string) => Promise<void>;
   /** 删掉一条队列项（用户改主意）。 */
   removeQueueItem: (item: QueueItem) => Promise<void>;
   /** 把 follow-up 提成 steer（别等它跑完，现在就告诉它）。 */
@@ -421,6 +434,28 @@ export function SessionProvider({
     }
   }, []);
 
+  /**
+   拉一次会话信息。
+   
+   失败不弹错：它**不影响任何操作**，只是面板里少几行。而且这台部署的 /status 是
+   有的（实测 200），真失败多半是暂时的网络抖动——下次打开面板会再试。
+   */
+  const refreshSessionStatus = useCallback(async (sessionId: string) => {
+    const { client, currentBotId } = stateRef.current;
+    if (client === null || currentBotId === null) return;
+    try {
+      const status = await client.getSessionStatus(currentBotId, sessionId);
+      dispatch({ type: 'sessionStatus', sessionId, status });
+    } catch {
+      // 读不到就保持上一次的值（清掉会让面板突然空掉，比旧值更像故障）。
+    }
+  }, []);
+
+  const sessionStatusFor = useCallback(
+    (sessionId: string): SessionStatus | null => stateRef.current.sessionStatus[sessionId] ?? null,
+    [],
+  );
+
   const queueFailure = useCallback((sessionId: string, error: unknown) => {
     dispatch({
       type: 'queue',
@@ -484,10 +519,18 @@ export function SessionProvider({
     if (client === null || currentSessionId === null) return;
     void ensureSessionInList(currentSessionId);
     void refreshHistory(currentSessionId);
-    // 队列是服务端持有的：换会话必须重新拉，不能用上一个会话的残留。
+    // 队列与会话信息都是服务端持有的：换会话必须重新拉，不能用上一个会话的残留。
     void refreshQueue(currentSessionId);
+    void refreshSessionStatus(currentSessionId);
     realtimeRef.current?.subscribe(currentSessionId);
-  }, [state.client, state.currentSessionId, refreshHistory, ensureSessionInList, refreshQueue]);
+  }, [
+    state.client,
+    state.currentSessionId,
+    refreshHistory,
+    ensureSessionInList,
+    refreshQueue,
+    refreshSessionStatus,
+  ]);
 
   /**
    * 兜住"owner 已经死了但投影还停在 running"的情况。
@@ -524,8 +567,10 @@ export function SessionProvider({
       void refreshHistory(currentSessionId);
       // run 结束 = 队列被消费的时机：follow-up 这时候才开始跑。
       void refreshQueue(currentSessionId);
+      // 用量在每一轮之后变化最明显，这时刷新才有意义。
+      void refreshSessionStatus(currentSessionId);
     }
-  }, [state.chats, state.currentSessionId, refreshHistory, refreshQueue]);
+  }, [state.chats, state.currentSessionId, refreshHistory, refreshQueue, refreshSessionStatus]);
 
   /**
    运行中定期对齐队列（兜底）。
@@ -765,6 +810,8 @@ export function SessionProvider({
       chatFor,
       submit,
       queueFor,
+      sessionStatusFor,
+      refreshSessionStatus,
       removeQueueItem,
       promoteQueueItem,
       abort,
@@ -785,6 +832,8 @@ export function SessionProvider({
       chatFor,
       submit,
       queueFor,
+      sessionStatusFor,
+      refreshSessionStatus,
       removeQueueItem,
       promoteQueueItem,
       abort,

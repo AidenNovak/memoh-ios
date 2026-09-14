@@ -21,6 +21,7 @@
  */
 
 import type { RuntimeDelta, RuntimeSnapshotPayload } from '../../api/protocol.ts';
+import type { SessionStatus } from '../../models/chat.ts';
 
 export interface Scene {
   id: string;
@@ -32,6 +33,17 @@ export interface Scene {
   frames: SceneFrame[];
   /** 回放完之后的界面该长什么样（用于人工核对，不用于自动断言）。 */
   expect: string;
+  /**
+   额外要展示的浮层（仅开发页用）。目前只支持会话信息面板。
+   
+   为什么需要它：`simctl` 没有点击能力，而会话信息面板是**点标题**才出现的。
+   没有这个入口，那段 UI 就只能在真机上人肉点开，验收脚本截不到——而"截不到"
+   在实践里等于"没人看"。
+   
+   `status` 用**真实部署实测到的形状**（字段值本身就是从部署机上取下来的），
+   不是编的样例。
+   */
+  sheet?: { kind: 'sessionInfo'; status: SessionStatus };
 }
 
 export type SceneFrame =
@@ -695,6 +707,64 @@ export const SCENES: Scene[] = [
         },
       ]),
     ],
+  },
+  {
+    id: 'chat-info',
+    title: '会话信息：这台部署的真实形状（没有窗口）',
+    intent:
+      '面板要回答"这个会话到哪儿了"。而**这台部署的服务端不给上下文窗口**——' +
+      'status 只回 used_tokens。这时绝不能算百分比：分母是编的，而用户会拿它判断' +
+      '还有多少余量。所以这里验证"没有分母时不显示比例，只报绝对值"。',
+    expect:
+      '分组卡片：上下文（已用 token，**没有进度条也没有百分比**）、会话（消息数）、' +
+      '缓存（命中率 / 缓存读取 / 输入 token）；页脚说明为什么没有比例。' +
+      '数值取自部署机上实测的响应。',
+    // 数据是 2026-09-14 从部署服务端取下来的真实响应，逐字段照抄。
+    sheet: {
+      kind: 'sessionInfo',
+      status: {
+        message_count: 4,
+        context_usage: { used_tokens: 12440 },
+        cache_stats: {
+          cache_read_tokens: 24064,
+          total_input_tokens: 24723,
+          cache_hit_rate: 97.33446588197225,
+        },
+        skills: [],
+      },
+    },
+    frames: [emptySnapshot(), runningSnapshot(1)],
+  },
+
+  {
+    id: 'chat-info-with-window',
+    title: '会话信息：服务端给了窗口时的形状',
+    intent:
+      '上游较新的版本会同时给出 context_window 与压缩阈值。那一支代码现在也必须' +
+      '是对的——否则等服务器升级，进度条会第一次被真正执行，而它从没被看过。' +
+      '这个场景把那个形状渲染出来（数据是按字段语义构造的，不是某台机器的实测值）。',
+    expect:
+      '多出"上下文用量"一行带进度条与百分比，以及"上下文窗口""自动压缩阈值"两行；' +
+      '页脚**不再**说明缺窗口。',
+    sheet: {
+      kind: 'sessionInfo',
+      status: {
+        message_count: 42,
+        context_usage: {
+          used_tokens: 96_000,
+          context_window: 200_000,
+          budget_plan: { window: 160_000, output_reserve: 8_000 },
+          compaction: { enabled: true, auto_tokens: 128_000 },
+        },
+        cache_stats: {
+          cache_read_tokens: 512_000,
+          total_input_tokens: 640_000,
+          cache_hit_rate: 80,
+        },
+        skills: [],
+      },
+    },
+    frames: [emptySnapshot(), runningSnapshot(1)],
   },
 ];
 

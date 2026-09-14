@@ -9,7 +9,7 @@
  * 通知上层清凭据回登录页——不要指望按 exp 判断就够，服务端每次请求还会查一次
  * 账号状态（停用/删除会立刻 401，即使 token 未过期）。
  */
-import type { QueueItem } from '../models/chat.ts';
+import type { QueueItem, SessionStatus } from '../models/chat.ts';
 import type {
   Account,
   ModelSummary,
@@ -135,6 +135,20 @@ export class MemohClient {
 
   updateSettings(botId: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
     return this.send<Record<string, unknown>>('PUT', `/bots/${botId}/settings`, { body });
+  }
+
+  // -------------------------------------------------------------- 会话信息
+
+  /**
+   * `GET /bots/{botId}/sessions/{sessionId}/status` —— 会话的消息数、上下文用量与
+   * cache 统计。
+   *
+   * 返回形状**按部署实测**（不是照上游类型抄）：这台部署只给 `used_tokens`，
+   * 没有 `context_window` / `budget_plan` / `compaction`。类型里把那些写成可选，
+   * 界面据此决定要不要显示百分比——**没有窗口就不算百分比**，算出来是编的。
+   */
+  getSessionStatus(botId: string, sessionId: string): Promise<SessionStatus> {
+    return this.send<SessionStatus>('GET', `/bots/${botId}/sessions/${sessionId}/status`);
   }
 
   // -------------------------------------------------------------- 会话队列

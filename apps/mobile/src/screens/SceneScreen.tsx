@@ -17,6 +17,7 @@ import { useScenePlayback } from '../features/verify/playback.ts';
 import { findScene, SCENES } from '../features/verify/scenes.ts';
 import { NativeMessageList } from '@memoh-ios/kit';
 import { ApprovalSheet } from '../ui/ApprovalSheet.tsx';
+import { SessionInfoSheet } from '../ui/SessionInfoSheet.tsx';
 import { UserInputSheet } from '../ui/UserInputSheet.tsx';
 import { usePalette, useTheme } from '../lib/theme/context.tsx';
 
@@ -201,6 +202,14 @@ export function SceneScreen() {
         userInput={chat.userInput}
         onSubmit={() => {}}
         onCancel={() => {}}
+      />
+      {/* 会话信息面板同样只是渲染：数据由场景给（见 scenes.ts 的 sheet 字段）。 */}
+      <SessionInfoSheet
+        visible={scene.sheet?.kind === 'sessionInfo'}
+        status={scene.sheet?.status ?? null}
+        loading={false}
+        error={null}
+        onClose={() => {}}
       />
     </View>
   );
