@@ -179,8 +179,10 @@ def parse_arguments(argv):
     parser.add_argument('--bundle-id', default=os.environ.get('MEMOH_UI_BUNDLE_ID', 'ai.memoh.ios'))
     parser.add_argument('--language', default=os.environ.get('MEMOH_UI_LANGUAGE', 'en'))
     parser.add_argument('--metro-port', type=int, default=int(os.environ.get('MEMOH_UI_METRO_PORT', '8097')))
+    # 见 pages.py 里同样的说明：编排器会按外观循环，所以默认跟随它给的那一种。
     parser.add_argument('--appearance', action='append', choices=APPEARANCES,
-                        help='只跑指定外观，可重复。默认两种都跑。')
+                        help='只跑指定外观，可重复。默认跟随编排器（MEMOH_UI_APPEARANCE），'
+                             '没有的话两种都跑。')
     parser.add_argument('--scene', action='append', help='只跑指定场景，可重复。默认全部。')
     return parser.parse_args(argv)
 
@@ -197,7 +199,13 @@ def main(argv=None):
         if not scenes:
             fail(f'no matching scenes for {sorted(wanted)}')
 
-    appearances = tuple(arguments.appearance) if arguments.appearance else APPEARANCES
+    from_appearance = os.environ.get('MEMOH_UI_APPEARANCE', '').strip()
+    if arguments.appearance:
+        appearances = tuple(arguments.appearance)
+    elif from_appearance in APPEARANCES:
+        appearances = (from_appearance,)
+    else:
+        appearances = APPEARANCES
     driver = Driver(arguments.udid, arguments.output, bundle_id=arguments.bundle_id,
                     language=arguments.language, app=arguments.app)
     if arguments.app is not None:

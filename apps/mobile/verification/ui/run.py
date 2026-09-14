@@ -280,7 +280,7 @@ class Context:
         return driver
 
 
-def run_case_script(case, directory, context):
+def run_case_script(case, directory, context, appearance=None):
     command = [
         sys.executable,
         str(case.script),
@@ -291,6 +291,14 @@ def run_case_script(case, directory, context):
         '--language', context.language,
         '--metro-port', str(context.metro_port),
     ]
+    # 把本轮分配的外观告诉 case。
+    #
+    # 编排器本身按外观循环（`execute_run` 里 `for appearance in appearances`），
+    # 所以 case **只应该跑这一个外观**。之前没传这个参数，于是像 `scenes`/`pages`
+    # 这种「自己也会遍历两种外观」的 case 每次都被跑两遍——同一份工作做了两次，
+    # 而且两个分片并行时会同时抢模拟器，表现为 `simctl launch timed out`。
+    if appearance is not None:
+        command.extend(['--appearance', appearance])
     environment = {
         **os.environ,
         'MEMOH_UI_UDID': context.udid,
@@ -298,6 +306,7 @@ def run_case_script(case, directory, context):
         'MEMOH_UI_BUNDLE_ID': context.bundle_id,
         'MEMOH_UI_LANGUAGE': context.language,
         'MEMOH_UI_METRO_PORT': str(context.metro_port),
+        'MEMOH_UI_APPEARANCE': appearance or '',
         'PYTHONPATH': os.pathsep.join([str(HERE), os.environ.get('PYTHONPATH', '')]).strip(os.pathsep),
     }
     log_path = Path(directory) / 'check.log'
@@ -331,7 +340,7 @@ def execute_case(case, appearance, directory, context):
     try:
         if case.video:
             recording = driver.record_start(directory / 'run.mp4')
-        run_case_script(case, directory, context)
+        run_case_script(case, directory, context, appearance)
     except BaseException as raised:  # includes TimeoutExpired from the script
         error = raised
         capture_failure(driver, directory, {})

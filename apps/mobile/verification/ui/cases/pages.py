@@ -196,7 +196,13 @@ def parse_arguments(argv):
     parser.add_argument('--language', default=os.environ.get('MEMOH_UI_LANGUAGE', 'en'))
     parser.add_argument('--metro-port', type=int, default=int(os.environ.get('MEMOH_UI_METRO_PORT', '8097')))
     parser.add_argument('--fixture-port', type=int, default=int(os.environ.get('MEMOH_FIXTURE_PORT', '18099')))
-    parser.add_argument('--appearance', action='append', choices=APPEARANCES)
+    # 默认跟随编排器给的那一种（`MEMOH_UI_APPEARANCE`）。
+    #
+    # 编排器本来就按外观循环调这个脚本，所以默认"两种都跑"会让同一份工作做两遍，
+    # 而且并行分片时会同时抢模拟器（表现为 simctl launch timed out）。直接单跑时
+    # （手动调试）不传就是两种都跑，方便。
+    parser.add_argument('--appearance', action='append', choices=APPEARANCES,
+                        default=None)
     parser.add_argument('--page', action='append', help='只跑指定画面')
     return parser.parse_args(argv)
 
@@ -212,7 +218,13 @@ def main(argv=None):
         pages = [page for page in pages if page['name'] in wanted]
         if not pages:
             fail(f'no matching pages for {sorted(wanted)}')
-    appearances = tuple(arguments.appearance) if arguments.appearance else APPEARANCES
+    from_appearance = os.environ.get('MEMOH_UI_APPEARANCE', '').strip()
+    if arguments.appearance:
+        appearances = tuple(arguments.appearance)
+    elif from_appearance in APPEARANCES:
+        appearances = (from_appearance,)
+    else:
+        appearances = APPEARANCES
 
     if not wait_for_fixture(arguments.fixture_port):
         fail(f'固定服务端没有起来（127.0.0.1:{arguments.fixture_port}）。'
