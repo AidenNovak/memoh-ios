@@ -97,6 +97,11 @@ export interface PendingQuestion {
   kind: string;
   options: { id: string; label: string; description?: string }[];
   allowCustom: boolean;
+  /**
+   * 自定义答案与选中项互斥（ACP 可显式声明）。缺省 false：多选时自定义文本
+   * 与已选项**并存**（服务端 `applySetText` 的注释写了这个例外）。
+   */
+  customExclusive: boolean;
   required: boolean;
   placeholder?: string;
 }

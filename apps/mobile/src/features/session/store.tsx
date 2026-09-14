@@ -37,10 +37,12 @@ import {
   applyHistory,
   applySnapshot,
   clearApproval,
+  clearUserInput,
   initialChatState,
   markStale,
   type ChatState,
 } from './reducer-exports.ts';
+import { CANCEL_REASON } from '../chat/userInput.ts';
 
 /**
  * 会话在列表里的摘要。
@@ -173,7 +175,8 @@ interface SessionContextValue {
   sendMessage: (text: string) => string | null;
   abort: () => void;
   respondApproval: (optionId: string) => void;
-  respondUserInput: (answers: unknown) => void;
+  /** 回应 agent 的提问：给答案，或显式取消（两者都会发出 `user_input_response`）。 */
+  respondUserInput: (payload?: { answers?: unknown; canceled?: boolean }) => void;
   dismissError: () => void;
   signOut: () => void;
 }
@@ -472,21 +475,35 @@ export function SessionProvider({
     dispatch({ type: 'chat', sessionId: currentSessionId, update: clearApproval });
   }, []);
 
-  const respondUserInput = useCallback((answers: unknown) => {
-    const { currentSessionId, chats } = stateRef.current;
-    const realtime = realtimeRef.current;
-    if (realtime === null || currentSessionId === null) return;
-    const chat = chats[currentSessionId];
-    const pending = chat?.userInput;
-    const runId = chat?.runId;
-    if (pending == null || runId == null) return;
-    realtime.respondToUserInput({
-      sessionId: currentSessionId,
-      runId,
-      decisionId: pending.userInputId,
-      answers,
-    });
-  }, []);
+  /**
+   * 回应 agent 的提问（`ask_user`）。
+   *
+   * 两种结束方式：给答案，或显式取消。**两种都必须发帧出去**——run 停在
+   * `waiting_decision` 上，不发它就永远不继续（用户看到的是"卡住了"）。
+   * 取消要带 `canceled`，否则服务端会当成一次空提交（见 realtime 的注释）。
+   */
+  const respondUserInput = useCallback(
+    (payload: { answers?: unknown; canceled?: boolean } = {}) => {
+      const { currentSessionId, chats } = stateRef.current;
+      const realtime = realtimeRef.current;
+      if (realtime === null || currentSessionId === null) return;
+      const chat = chats[currentSessionId];
+      const pending = chat?.userInput;
+      const runId = chat?.runId;
+      if (pending == null || runId == null) return;
+      realtime.respondToUserInput({
+        sessionId: currentSessionId,
+        runId,
+        decisionId: pending.userInputId,
+        answers: payload.answers,
+        canceled: payload.canceled === true,
+        reason: payload.canceled === true ? CANCEL_REASON : undefined,
+      });
+      // 乐观清掉：否则表单继续挂在屏幕上，用户会以为没生效而重复点。
+      dispatch({ type: 'chat', sessionId: currentSessionId, update: clearUserInput });
+    },
+    [],
+  );
 
   const signOut = useCallback(() => {
     realtimeRef.current?.dispose();

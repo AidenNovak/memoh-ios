@@ -331,6 +331,7 @@ function questionFrom(raw: {
   kind: string;
   options?: { id: string; label: string; description?: string }[];
   allow_custom?: boolean;
+  custom_exclusive?: boolean;
   required?: boolean;
   placeholder?: string;
 }): PendingQuestion {
@@ -339,8 +340,22 @@ function questionFrom(raw: {
     text: raw.text,
     kind: raw.kind,
     options: raw.options ?? [],
-    allowCustom: raw.allow_custom !== false,
-    required: raw.required === true,
+    /**
+     * 这两个默认值**必须**与上游 Web 客户端一致，不能按"字段缺省 = false"的直觉写。
+     *
+     * `allow_custom`：服务端 `UIQuestion.AllowCustom` 是 `bool,omitempty`，校验里
+     * `customText != "" && !AllowCustom` 直接报错「does not allow a custom answer」。
+     * 所以缺省是**不允许**自定义；写成 `!== false`（缺省允许）会让用户在自认为
+     * 合规的情况下提交一个被服务端硬拒的答案。
+     *
+     * `required`：服务端是**三态** `*bool`（`questionIsExplicitlyRequired` =
+     * `Required != nil && *Required`）。缺省表示"老式 ask_user 载荷"，上游 Web
+     * 的政策是**必须回答**（`required !== false`）——ACP 表单才会显式给 false。
+     * 写成 `=== true`（缺省不必答）会放用户提交空表单，agent 那一轮白转。
+     */
+    allowCustom: raw.allow_custom === true,
+    customExclusive: raw.custom_exclusive === true,
+    required: raw.required !== false,
     placeholder: raw.placeholder,
   };
 }

@@ -304,7 +304,10 @@ export class MemohRealtime {
     sessionId: string;
     runId: string;
     decisionId: string;
-    answers: unknown;
+    answers?: unknown;
+    /** 取消整次提问（不回答）。服务端接受 `canceled` + `reason`。 */
+    canceled?: boolean;
+    reason?: string;
     controlId?: string;
   }): string {
     const controlId = params.controlId ?? uuid();
@@ -314,7 +317,12 @@ export class MemohRealtime {
       session_id: params.sessionId,
       decision_id: params.decisionId,
       control_id: controlId,
+      // 回答与取消是同一帧的两个可选部分（服务端同一套解析）。
+      // 只发 `answers` 而不显式给 `canceled` 时，"取消"会被理解成一次空提交，
+      // run 就继续等一个永远不来的答案。
       answers: params.answers,
+      canceled: params.canceled === true,
+      reason: params.reason,
     });
     return controlId;
   }

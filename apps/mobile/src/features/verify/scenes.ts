@@ -568,6 +568,134 @@ export const SCENES: Scene[] = [
       },
     ],
   },
+
+  {
+    id: 'ask-user-single',
+    title: 'agent 提问：单选 + 自定义',
+    intent:
+      'agent 用 ask_user 提问时 run 停在 waiting_decision——不回应就永远不继续。' +
+      '问题的正文、选项、以及"允许自定义"都必须完整可见，提交按钮只在答案完整时可用。',
+    expect:
+      '底部弹出提问表：问题正文 + 三个选项（单选，一行一个）；因为 allow_custom 为真、' +
+      '且只有这一题，底部给一个输入框（写"其他"无需先点 Other）；提交按钮此时**禁用**' +
+      '（必答未答），取消按钮可点。',
+    frames: [
+      emptySnapshot(),
+      runningSnapshot(1),
+      {
+        kind: 'delta',
+        epoch: EPOCH,
+        seq: 2,
+        delta: {
+          user_turn_upserts: [
+            {
+              turn_id: TURN_USER,
+              role: 'user',
+              text: '把这批图片导出成什么格式？',
+              turn_position: 1,
+            },
+          ],
+        },
+      },
+      waitingSnapshot(3, [
+        {
+          id: 70,
+          type: 'tool',
+          name: 'ask_user',
+          running: false,
+          // 真实形状：提问挂在 tool 块的 `user_input` 上，走审批同一套决策机制。
+          // `required` 在这里**故意省略**——老式 ask_user 载荷就是省略的，
+          // 上游政策是"缺省即必答"（见 reducer 的 questionFrom 注释）。
+          user_input: {
+            user_input_id: 'scene-input-1',
+            short_id: 1,
+            status: 'pending',
+            can_respond: true,
+            questions: [
+              {
+                id: 'q1',
+                text: '导出格式选哪个？',
+                kind: 'single_select',
+                allow_custom: true,
+                options: [
+                  { id: 'o1', label: 'WebP（体积小）', description: '适合直接发布' },
+                  { id: 'o2', label: 'PNG（无损）', description: '体积最大' },
+                  { id: 'o3', label: 'AVIF', description: '压缩率最高，兼容性差' },
+                ],
+              },
+            ],
+          },
+        },
+      ]),
+    ],
+  },
+
+  {
+    id: 'ask-user-multi',
+    title: 'agent 提问：多问题（选项 + 文本）',
+    intent:
+      '一次问多个问题时，每个问题各自成组（多问题的答案不能塞进一个底部输入框）。' +
+      '文本问题必须有输入框，选择问题的输入框只在选了"其他"之后才出现。',
+    expect:
+      '两题分块：第一题多选 + 三个选项 + "其他…"行；第二题文本带独立输入框。' +
+      '没有底部输入框（多问题时它会出现歧义）；提交禁用直到两题都答完。',
+    frames: [
+      emptySnapshot(),
+      runningSnapshot(1),
+      {
+        kind: 'delta',
+        epoch: EPOCH,
+        seq: 2,
+        delta: {
+          user_turn_upserts: [
+            {
+              turn_id: TURN_USER,
+              role: 'user',
+              text: '帮我准备发布，先确认两件事',
+              turn_position: 1,
+            },
+          ],
+        },
+      },
+      waitingSnapshot(3, [
+        {
+          id: 71,
+          type: 'tool',
+          name: 'ask_user',
+          running: false,
+          user_input: {
+            user_input_id: 'scene-input-2',
+            short_id: 2,
+            status: 'pending',
+            can_respond: true,
+            questions: [
+              {
+                id: 'q1',
+                text: '要更新哪些渠道？',
+                kind: 'multi_select',
+                allow_custom: true,
+                // ACP 表单会显式给这两个字段；这里是它的形状。
+                custom_exclusive: false,
+                required: true,
+                options: [
+                  { id: 'o1', label: 'App Store' },
+                  { id: 'o2', label: 'TestFlight', description: '仅内部' },
+                  { id: 'o3', label: '企业分发' },
+                ],
+              },
+              {
+                id: 'q2',
+                text: '版本号写什么？',
+                kind: 'text',
+                required: true,
+                placeholder: '例如 0.2.0',
+              },
+            ],
+          },
+        },
+      ]),
+    ],
+  },
 ];
 
 export function findScene(id: string): Scene | null {

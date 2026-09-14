@@ -17,6 +17,7 @@ import { useScenePlayback } from '../features/verify/playback.ts';
 import { findScene, SCENES } from '../features/verify/scenes.ts';
 import { NativeMessageList } from '@memoh-ios/kit';
 import { ApprovalSheet } from '../ui/ApprovalSheet.tsx';
+import { UserInputSheet } from '../ui/UserInputSheet.tsx';
 import { usePalette, useTheme } from '../lib/theme/context.tsx';
 
 /** 场景索引：列出全部场景，点进去看。 */
@@ -193,6 +194,14 @@ export function SceneScreen() {
 
       {/* 审批面板在场景里也只是渲染，不做动作——场景只负责展示状态。 */}
       <ApprovalSheet approval={chat.approval} onChoose={() => {}} />
+      {/* 与 ChatScreen 同一套分支：场景台要能看见提问表的真实样子。
+          这里的提交/取消是空实现——场景不连服务端。 */}
+      <UserInputSheet
+        key={chat.userInput?.userInputId ?? 'none'}
+        userInput={chat.userInput}
+        onSubmit={() => {}}
+        onCancel={() => {}}
+      />
     </View>
   );
 }

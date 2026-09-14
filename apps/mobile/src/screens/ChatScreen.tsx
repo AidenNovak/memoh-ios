@@ -20,6 +20,7 @@ import { useT } from '../lib/i18n/useT.ts';
 import { radius, radiusStyle } from '../lib/theme/tokens.ts';
 import { usePalette, useTheme } from '../lib/theme/context.tsx';
 import { ApprovalSheet } from '../ui/ApprovalSheet.tsx';
+import { UserInputSheet } from '../ui/UserInputSheet.tsx';
 
 export function ChatScreen() {
   const params = useLocalSearchParams<{ sessionId: string }>();
@@ -40,6 +41,7 @@ export function ChatScreen() {
     abort,
     chatFor,
     respondApproval,
+    respondUserInput,
     realtimeEnabled,
     currentBot,
   } = useSession();
@@ -194,70 +196,86 @@ export function ChatScreen() {
         在别处冒出一个红色胶囊既不像系统控件也遮挡内容。形状不变、只换字形，
         所以中途不会闪。
       */}
-      <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'flex-end',
-          paddingHorizontal: spacing.lg,
-          paddingBottom: insets.bottom + spacing.sm,
-          paddingTop: spacing.sm,
-          gap: spacing.sm,
-          borderTopWidth: StyleSheet.hairlineWidth,
-          borderTopColor: palette.separator,
-          backgroundColor: palette.card,
-        }}
-      >
-        <TextInput
-          value={draft}
-          onChangeText={setDraft}
-          placeholder={t('chat.placeholder')}
-          placeholderTextColor={palette.placeholder}
-          multiline
-          style={[
-            typography.body,
-            {
-              flex: 1,
-              color: palette.label,
-              backgroundColor: palette.field,
-              // 半高圆角：34pt 高时是胶囊，长高了自然变成圆角矩形。
-              ...radiusStyle(radius.lg),
-              paddingHorizontal: spacing.md,
-              // 上下对称的内边距。给单边额外 padding 会让多行时的首行偏移。
-              paddingVertical: spacing.sm,
-              // 34pt 起步（与按钮同高），最多约 5 行。
-              maxHeight: 120,
-              minHeight: 34,
-            },
-          ]}
-        />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={chat.running ? t('chat.stop') : t('chat.send')}
-          disabled={!chat.running && draft.trim() === ''}
-          onPress={chat.running ? abort : onSend}
-          style={({ pressed }) => [
-            styles.send,
-            {
-              backgroundColor: canSend ? palette.accent : palette.field,
-              opacity: pressed ? 0.8 : 1,
-            },
-          ]}
+      {/*
+        agent 提问期间**隐藏输入区**：提问是"当前待办"，与 composer 争同一个位置
+        只会让人不知道该用哪个（上游 Web 也是表单接管 composer）。
+      */}
+      {chat.userInput === null ? (
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'flex-end',
+            paddingHorizontal: spacing.lg,
+            paddingBottom: insets.bottom + spacing.sm,
+            paddingTop: spacing.sm,
+            gap: spacing.sm,
+            borderTopWidth: StyleSheet.hairlineWidth,
+            borderTopColor: palette.separator,
+            backgroundColor: palette.card,
+          }}
         >
-          <Text
+          <TextInput
+            value={draft}
+            onChangeText={setDraft}
+            placeholder={t('chat.placeholder')}
+            placeholderTextColor={palette.placeholder}
+            multiline
             style={[
-              typography.subhead,
+              typography.body,
               {
-                fontWeight: '600',
-                color: canSend ? palette.onAccent : palette.tertiaryLabel,
+                flex: 1,
+                color: palette.label,
+                backgroundColor: palette.field,
+                // 半高圆角：34pt 高时是胶囊，长高了自然变成圆角矩形。
+                ...radiusStyle(radius.lg),
+                paddingHorizontal: spacing.md,
+                // 上下对称的内边距。给单边额外 padding 会让多行时的首行偏移。
+                paddingVertical: spacing.sm,
+                // 34pt 起步（与按钮同高），最多约 5 行。
+                maxHeight: 120,
+                minHeight: 34,
+              },
+            ]}
+          />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={chat.running ? t('chat.stop') : t('chat.send')}
+            disabled={!chat.running && draft.trim() === ''}
+            onPress={chat.running ? abort : onSend}
+            style={({ pressed }) => [
+              styles.send,
+              {
+                backgroundColor: canSend ? palette.accent : palette.field,
+                opacity: pressed ? 0.8 : 1,
               },
             ]}
           >
-            {chat.running ? '■' : '↑'}
-          </Text>
-        </Pressable>
-      </View>
+            <Text
+              style={[
+                typography.subhead,
+                {
+                  fontWeight: '600',
+                  color: canSend ? palette.onAccent : palette.tertiaryLabel,
+                },
+              ]}
+            >
+              {chat.running ? '■' : '↑'}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <ApprovalSheet approval={chat.approval} onChoose={respondApproval} />
+      {/*
+        提问表用 `key` 绑定提问 id：换一次提问就重新挂载，草稿不会串到下一份。
+        不可跳过——run 停在 waiting_decision 上，不答（或取消）它就永远不继续。
+      */}
+      <UserInputSheet
+        key={chat.userInput?.userInputId ?? 'none'}
+        userInput={chat.userInput}
+        onSubmit={(answers) => respondUserInput({ answers })}
+        onCancel={() => respondUserInput({ canceled: true })}
+      />
     </KeyboardAvoidingView>
   );
 }

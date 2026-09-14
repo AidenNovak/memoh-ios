@@ -742,3 +742,102 @@ test('同一 id 的重复 append 不会因乱序帧丢失内容', () => {
   }
   assert.equal(state.streams['1'].content, 'abcde');
 });
+
+test('ask_user 的提问能从 tool 块的 user_input 里读出来', () => {
+  // 提问走审批同一套决策机制；漏读它 run 会永久停在 waiting_decision。
+  let state = initialChatState;
+  state = applyDelta(state, 'e1', 1, {
+    message_upserts: [
+      {
+        id: 90,
+        type: 'tool',
+        name: 'ask_user',
+        running: false,
+        user_input: {
+          user_input_id: 'ui-1',
+          short_id: 7,
+          status: 'pending',
+          can_respond: true,
+          questions: [{ id: 'q1', text: '选哪个？', kind: 'single_select', options: [] }],
+        },
+      },
+    ],
+  });
+  assert.equal(state.userInput?.userInputId, 'ui-1');
+  assert.equal(state.userInput?.shortId, 7);
+  assert.equal(state.userInput?.questions.length, 1);
+});
+
+test('缺省即必答、缺省即不允许自定义——与服务端和上游一致', () => {
+  /**
+   * 这两个默认值写反的代价：用户在界面上"答完了"、提交却被服务端拒收，run 静默卡住。
+   * 服务端 `UIQuestion.Required` 是三态，缺省表示老式 ask_user 载荷，上游政策是必答；
+   * `AllowCustom` 缺省为 false，带 custom_text 会被硬拒。
+   */
+  let state = initialChatState;
+  state = applyDelta(state, 'e1', 1, {
+    message_upserts: [
+      {
+        id: 91,
+        type: 'tool',
+        name: 'ask_user',
+        running: false,
+        user_input: {
+          user_input_id: 'ui-2',
+          status: 'pending',
+          can_respond: true,
+          // 两个字段都**不存在**：老式载荷的形状。
+          questions: [{ id: 'q1', text: '随便问', kind: 'text' }],
+        },
+      },
+    ],
+  });
+  const question = state.userInput?.questions[0];
+  assert.equal(question?.required, true, '缺省必须视为必答');
+  assert.equal(question?.allowCustom, false, '缺省必须视为不允许自定义');
+  assert.equal(question?.customExclusive, false);
+
+  // ACP 表单会显式给 false —— 那时才是可选、才允许自定义。
+  let acp = initialChatState;
+  acp = applyDelta(acp, 'e1', 1, {
+    message_upserts: [
+      {
+        id: 92,
+        type: 'tool',
+        name: 'ask_user',
+        running: false,
+        user_input: {
+          user_input_id: 'ui-3',
+          status: 'pending',
+          can_respond: true,
+          questions: [
+            { id: 'q1', text: '可选的问题', kind: 'text', required: false, allow_custom: true },
+          ],
+        },
+      },
+    ],
+  });
+  assert.equal(acp.userInput?.questions[0]?.required, false);
+  assert.equal(acp.userInput?.questions[0]?.allowCustom, true);
+});
+
+test('已经答过的提问不再挡在界面上', () => {
+  let state = initialChatState;
+  state = applyDelta(state, 'e1', 1, {
+    message_upserts: [
+      {
+        id: 93,
+        type: 'tool',
+        name: 'ask_user',
+        running: false,
+        user_input: {
+          user_input_id: 'ui-4',
+          status: 'answered',
+          can_respond: true,
+          questions: [{ id: 'q1', text: 'x', kind: 'text' }],
+        },
+      },
+    ],
+  });
+  assert.equal(state.userInput, null, '非 pending 的提问不该继续要求用户回应');
+});
