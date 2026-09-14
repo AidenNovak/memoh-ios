@@ -90,6 +90,22 @@ export interface ApprovalChoice {
   tone: 'allow' | 'reject' | 'neutral';
 }
 
+/**
+ * 会话队列里的一条待发消息（服务端持有，客户端只显示与操作）。
+ *
+ * 两条队列共用一个读取形状（上游 `SessionQueueItem` 也是这么合并的）：
+ * `steer` 是插进正在跑的那一轮，`follow-up` 是这轮跑完再跑。
+ */
+export interface QueueItem {
+  itemId: string;
+  text: string;
+  /** 服务端给的权威顺序。 */
+  position: number;
+  /** accepted = 排队中，claimed = agent 正在取用；其余是终态、不再显示。 */
+  status: string;
+  kind: 'follow-up' | 'steer';
+}
+
 /** agent 主动提问，走和审批同一套机制。 */
 export interface PendingQuestion {
   questionId: string;

@@ -188,3 +188,83 @@ test('listModels 能同时吃下 {items:[]} 与裸数组两种形状', async () 
   assert.equal(wrappedItems.length, 1);
   assert.equal(wrappedItems[0].model_id, 'k3');
 });
+
+test('入队 follow-up：路径、方法、幂等 id 与正文都对', async () => {
+  // 幂等 id 写错的代价：服务端把重试当成新的一条，agent 后面连着答两遍同一句话。
+  const calls = stubFetch({ status: 200, body: '{"item_id":"i1"}' });
+  const client = new MemohClient({ baseUrl: 'http://x', getToken: () => 'tok' });
+
+  await client.enqueueFollowUp('bot-1', 'sess-1', '补一句', 'inv-9');
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].method, 'POST');
+  assert.equal(calls[0].url, 'http://x/bots/bot-1/sessions/sess-1/follow-up-queue');
+  assert.deepEqual(JSON.parse(calls[0].body), { invocation_id: 'inv-9', text: '补一句' });
+});
+
+test('入队 steer：打到 steer-queue，不是 follow-up-queue', async () => {
+  // 这两条队列打错端点会很隐蔽：一样是 200，只是排进了另一条队列（多等一轮）。
+  const calls = stubFetch({ status: 200, body: '{}' });
+  const client = new MemohClient({ baseUrl: 'http://x', getToken: () => 'tok' });
+
+  await client.enqueueSteer('bot-1', 'sess-1', '现在就告诉它', 'inv-1');
+
+  assert.equal(calls[0].url, 'http://x/bots/bot-1/sessions/sess-1/steer-queue');
+  assert.deepEqual(JSON.parse(calls[0].body), { invocation_id: 'inv-1', text: '现在就告诉它' });
+});
+
+test('读队列：两条队列一起拿，形状归一成 camelCase', async () => {
+  const calls = stubFetch({
+    status: 200,
+    body: JSON.stringify({
+      follow_up: [{ item_id: 'f1', text: '后面再跑', position: 2, status: 'accepted' }],
+      steer: [{ item_id: 's1', text: '插一句', position: 1, status: 'claimed' }],
+      steer_supported: true,
+    }),
+  });
+  const client = new MemohClient({ baseUrl: 'http://x', getToken: () => 'tok' });
+
+  const queue = await client.getSessionQueue('bot-1', 'sess-1');
+
+  assert.equal(calls[0].method, 'GET');
+  assert.equal(calls[0].url, 'http://x/bots/bot-1/sessions/sess-1/queue');
+  assert.equal(queue.steerSupported, true);
+  assert.deepEqual(queue.followUp, [
+    { itemId: 'f1', text: '后面再跑', position: 2, status: 'accepted', kind: 'follow-up' },
+  ]);
+  assert.deepEqual(queue.steer, [
+    { itemId: 's1', text: '插一句', position: 1, status: 'claimed', kind: 'steer' },
+  ]);
+});
+
+test('读队列：服务端没给 steer_supported 时不猜成 true', async () => {
+  // 服务端没声明支持插话时给入口，用户点了必然失败——宁可不给。
+  stubFetch({ status: 200, body: '{"follow_up":[]}' });
+  const client = new MemohClient({ baseUrl: 'http://x', getToken: () => 'tok' });
+
+  const queue = await client.getSessionQueue('bot-1', 'sess-1');
+
+  assert.equal(queue.steerSupported, false);
+});
+
+test('删队列项：按 kind 选对端点，item_id 要转义', async () => {
+  const calls = stubFetch({ status: 204, body: '' });
+  const client = new MemohClient({ baseUrl: 'http://x', getToken: () => 'tok' });
+
+  await client.deleteQueueItem('bot-1', 'sess-1', 'follow-up', 'item/1');
+  await client.deleteQueueItem('bot-1', 'sess-1', 'steer', 'item 2');
+
+  assert.equal(calls[0].method, 'DELETE');
+  assert.equal(calls[0].url, 'http://x/bots/bot-1/sessions/sess-1/follow-up-queue/item%2F1');
+  assert.equal(calls[1].url, 'http://x/bots/bot-1/sessions/sess-1/steer-queue/item%202');
+});
+
+test('提成 steer：打 follow-up-queue/<id>/steer', async () => {
+  const calls = stubFetch({ status: 200, body: '{}' });
+  const client = new MemohClient({ baseUrl: 'http://x', getToken: () => 'tok' });
+
+  await client.promoteQueueItem('bot-1', 'sess-1', 'f1');
+
+  assert.equal(calls[0].method, 'POST');
+  assert.equal(calls[0].url, 'http://x/bots/bot-1/sessions/sess-1/follow-up-queue/f1/steer');
+});

@@ -254,6 +254,30 @@ const TOKEN = 'fixture-token';
 /** 当前场景。验收脚本通过 `/__scenario` 切换，REST 与 WS 都按它出数据。 */
 let currentScenario = 'chat-tools';
 
+/**
+ 待发队列的固定数据。
+ 
+ 只有 `queue` 场景才有条目——其余场景返回空队列，这样静态截图之间可比，
+ 也顺带验证"没有待发项时队列条整块不出现"。
+ 
+ `status` 用真实枚举值：`accepted`/`claimed` 会显示，`applied` 是终态、不该出现
+ （这里故意放一条，验证客户端确实会把它滤掉）。
+ */
+const QUEUE_ITEMS = {
+  follow_up: [
+    {
+      item_id: 'f1',
+      text: '顺便把 README 里的安装步骤也更新一下',
+      position: 1,
+      status: 'accepted',
+    },
+    // 终态：不该出现在界面上。
+    { item_id: 'f0', text: '这条已经执行完了', position: 0, status: 'applied' },
+  ],
+  steer: [{ item_id: 's1', text: '先别改前端，只看后端', position: 1, status: 'claimed' }],
+  steer_supported: true,
+};
+
 /** bot 的运行时配置。形状照 `PUT /bots/{id}/settings` 的实测要求（多字段会被整条拒）。 */
 const SETTINGS = {
   model: 'deepseek-v4-flash',
@@ -284,6 +308,11 @@ const server = createServer(async (request, response) => {
   const url = new URL(request.url, `http://127.0.0.1:${PORT}`);
   const path = url.pathname;
   const method = request.method ?? 'GET';
+
+  // 记一行请求。这不是调试残留：验收失败时最先要问的就是"客户端到底请求了什么"，
+  // 而失败信息里只有"屏幕上没出现某段文字"。有了这行就能立刻分辨
+  // "客户端没请求" / "请求了但响应形状不对" / "响应对了但没渲染"。
+  console.log(`${method} ${path}${url.search}`);
 
   // 场景切换：验收脚本改这个，之后的 REST/WS 都按新场景出数据。
   if (path === '/__scenario') {
@@ -341,6 +370,29 @@ const server = createServer(async (request, response) => {
   }
   if (oneSession && method === 'DELETE') {
     return json(response, 204, {});
+  }
+
+  // 会话队列：两条队列一起拿（与上游 GET /queue 同形）。
+  const queuePath = path.match(/^\/bots\/([^/]+)\/sessions\/([^/]+)\/queue$/);
+  if (queuePath && method === 'GET') {
+    if (currentScenario !== 'queue') {
+      return json(response, 200, { follow_up: [], steer: [], steer_supported: true });
+    }
+    return json(response, 200, QUEUE_ITEMS);
+  }
+
+  // 入队/删除/提级：验收只需要它们**能成功**（真正验证的是客户端发的请求形状，
+  // 那部分在 tests/client.test.mjs 里断言）。
+  if (/^\/bots\/[^/]+\/sessions\/[^/]+\/(follow-up|steer)-queue/.test(path)) {
+    if (method === 'POST') {
+      return json(response, 200, {
+        item_id: 'queued-1',
+        text: '',
+        position: 1,
+        status: 'accepted',
+      });
+    }
+    if (method === 'DELETE') return json(response, 200, { ok: true });
   }
 
   const messages = path.match(/^\/bots\/([^/]+)\/messages$/);

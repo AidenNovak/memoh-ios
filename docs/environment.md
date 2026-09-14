@@ -116,6 +116,39 @@ ssh vultr-sg "/opt/memoh-dev/ops/memoh-dev.sh pull"        # 拉新镜像并重�
 ssh vultr-sg "/opt/memoh-dev/ops/memoh-dev.sh psql"        # 直连数据库
 ```
 
+## 部署实际支持什么（对照桌面端能力的唯一权威）
+
+**不要拿上游 main 分支的能力当"部署支持"**。这台服务器的镜像是固定的
+（`memohai/server` / `memohai/web`，2026-08-30 构建），而 `src/` 检出是 9/13 的——
+**服务端版本落后于检出**。判断"某个功能能不能用"必须实测，方法有两条：
+
+```bash
+# 1) 直接探端点。404 = 这个版本没有它；405 = 存在但方法不对。
+TOKEN=$(curl -s -X POST http://127.0.0.1:18080/auth/login -H 'content-type: application/json' \
+  -d "{\"username\":\"admin\",\"password\":\"$MEMOH_ADMIN_PASSWORD\"}" | python3 -c 'import json,sys;print(json.load(sys.stdin)["access_token"])')
+curl -s -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:18080/bots/$BOT/sessions/$SID/queue" \
+  -H "Authorization: Bearer $TOKEN"
+
+# 2) 看同部署的桌面端产物里有没有对应的界面代码（locale key 最可靠）。
+ssh vultr-sg 'docker cp memoh-web:/app/. /tmp/webcheck/ 2>/dev/null;
+  cd /tmp/webcheck/assets && for k in infoContextUsage queueEnqueueFollowUp; do
+    printf "%-24s %s\n" "$k" "$(grep -l "$k" *.js 2>/dev/null | wc -l)"; done'
+```
+
+**2026-09-14 实测的能力矩阵**（`memohai/server` 8/30 镜像 + 同部署桌面端产物）：
+
+| 能力                                      | 部署服务端  | 部署桌面端              | 移动端                        |
+| ----------------------------------------- | ----------- | ----------------------- | ----------------------------- |
+| 对话 / 流式 / 工具调用                    | ✅          | ✅                      | ✅                            |
+| 工具审批（含兜底选项）                    | ✅          | ✅                      | ✅                            |
+| `ask_user` 提问与作答 / 取消              | ✅          | ✅                      | ✅                            |
+| 上下文用量 / cache 统计（`GET …/status`） | ✅          | ✅（session-info 面板） | ❌ 未做                       |
+| 会话队列 / 插话（`/queue` 等）            | ❌ 一律 404 | ❌ 产物里没有           | 按能力探测降级为"运行中=停止" |
+
+**为什么移动端要按能力探测队列**：队列是上游较新的能力，这台服务器没有。客户端
+探测到 404 就记下 `support: 'no'`，运行中的发送按钮回到"停止"语义——**与同一个
+部署的桌面端行为一致**。不探测会给用户一个必然失败的入口（点下去只会看到报错）。
+
 ## 协议冒烟测试与集成测试
 
 这是两件不同的事，别混：

@@ -9,6 +9,7 @@
  * 通知上层清凭据回登录页——不要指望按 exp 判断就够，服务端每次请求还会查一次
  * 账号状态（停用/删除会立刻 401，即使 token 未过期）。
  */
+import type { QueueItem } from '../models/chat.ts';
 import type {
   Account,
   ModelSummary,
@@ -19,6 +20,27 @@ import type {
   RefreshResponse,
   UIMessageListResponse,
 } from './types.ts';
+
+/**
+ * 队列项的线上形状（snake_case、字段可缺）。转成 `QueueItem` 再由界面渲染——
+ * 界面不直接碰线上形状，免得服务端加字段就漏出来。
+ */
+interface RawQueueItem {
+  item_id?: string;
+  text?: string;
+  position?: number;
+  status?: string;
+}
+
+function toQueueItem(raw: RawQueueItem, kind: 'follow-up' | 'steer'): QueueItem {
+  return {
+    itemId: raw.item_id ?? '',
+    text: raw.text ?? '',
+    position: raw.position ?? 0,
+    status: raw.status ?? '',
+    kind,
+  };
+}
 
 export class ApiError extends Error {
   readonly status: number;
@@ -113,6 +135,81 @@ export class MemohClient {
 
   updateSettings(botId: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
     return this.send<Record<string, unknown>>('PUT', `/bots/${botId}/settings`, { body });
+  }
+
+  // -------------------------------------------------------------- 会话队列
+
+  /**
+   * `GET /bots/{botId}/sessions/{sessionId}/queue` —— 两条队列一起拿。
+   *
+   * `steer_supported` 决定界面要不要给"插话"选项：不是所有运行形态都能被插话
+   * （服务端 `SteerSupported`）。宁可不给这个入口，也不要给了却必然失败。
+   */
+  async getSessionQueue(
+    botId: string,
+    sessionId: string,
+  ): Promise<{ followUp: QueueItem[]; steer: QueueItem[]; steerSupported: boolean }> {
+    const raw = await this.send<{
+      follow_up?: RawQueueItem[];
+      steer?: RawQueueItem[];
+      steer_supported?: boolean;
+    }>('GET', `/bots/${botId}/sessions/${sessionId}/queue`);
+    return {
+      followUp: (raw.follow_up ?? []).map((item) => toQueueItem(item, 'follow-up')),
+      steer: (raw.steer ?? []).map((item) => toQueueItem(item, 'steer')),
+      steerSupported: raw.steer_supported === true,
+    };
+  }
+
+  /**
+   * `POST .../follow-up-queue` —— 这一轮跑完再跑（运行中发送的默认落点）。
+   *
+   * `invocationId` 是**幂等身份**：同一个发送手势重试必须带同一个 id，否则服务端
+   * 会入两条（见 `features/chat/queue.ts` 的闸门说明）。
+   */
+  enqueueFollowUp(
+    botId: string,
+    sessionId: string,
+    text: string,
+    invocationId: string,
+  ): Promise<RawQueueItem> {
+    return this.send<RawQueueItem>('POST', `/bots/${botId}/sessions/${sessionId}/follow-up-queue`, {
+      body: { invocation_id: invocationId, text },
+    });
+  }
+
+  /** `POST .../steer-queue` —— 插进正在跑的那一轮，agent 立刻看到。 */
+  enqueueSteer(
+    botId: string,
+    sessionId: string,
+    text: string,
+    invocationId: string,
+  ): Promise<RawQueueItem> {
+    return this.send<RawQueueItem>('POST', `/bots/${botId}/sessions/${sessionId}/steer-queue`, {
+      body: { invocation_id: invocationId, text },
+    });
+  }
+
+  /** 删掉一条还没被取用的队列项。 */
+  deleteQueueItem(
+    botId: string,
+    sessionId: string,
+    kind: 'follow-up' | 'steer',
+    itemId: string,
+  ): Promise<unknown> {
+    const segment = kind === 'steer' ? 'steer-queue' : 'follow-up-queue';
+    return this.send<unknown>(
+      'DELETE',
+      `/bots/${botId}/sessions/${sessionId}/${segment}/${encodeURIComponent(itemId)}`,
+    );
+  }
+
+  /** 把一条 follow-up 提成 steer（"别等它跑完，现在就告诉它"）。 */
+  promoteQueueItem(botId: string, sessionId: string, itemId: string): Promise<RawQueueItem> {
+    return this.send<RawQueueItem>(
+      'POST',
+      `/bots/${botId}/sessions/${sessionId}/follow-up-queue/${encodeURIComponent(itemId)}/steer`,
+    );
   }
 
   /**

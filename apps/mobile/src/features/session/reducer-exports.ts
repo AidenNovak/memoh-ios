@@ -15,6 +15,7 @@ export {
   dropOptimistic,
   initialChatState,
   isFallbackOption,
+  isRunActive,
   isRunAbandoned,
   markStale,
   resetLive,

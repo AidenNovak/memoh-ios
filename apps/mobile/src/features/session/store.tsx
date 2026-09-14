@@ -27,9 +27,18 @@ import { AppState as RNAppState } from 'react-native';
 import { ApiError, MemohClient } from '../../api/client.ts';
 import { MemohRealtime, type ConnectionState } from '../../api/realtime.ts';
 import { canOpenRealtime, type Bot, type Session as MemohSession } from '../../api/types.ts';
+import type { QueueItem } from '../../models/chat.ts';
+import { uuid } from '../../lib/uuid.ts';
+import {
+  composerActionWithSupport,
+  QueueSubmissionGate,
+  visibleQueueItems,
+  type QueueSupport,
+} from '../chat/queue.ts';
 import {
   decisionForFallback,
   isFallbackOption,
+  isRunActive,
   isRunAbandoned,
   settleAbandonedRun,
   appendOptimisticUserMessage,
@@ -77,10 +86,46 @@ interface UiState {
   sessionsLoading: boolean;
   /** sessionId → 聊天状态。 */
   chats: Record<string, ChatState>;
+  /** sessionId → 待发队列（服务端持有的 follow-up / steer）。 */
+  queues: Record<string, QueueView>;
   currentSessionId: string | null;
   connection: ConnectionState;
   error: string | null;
 }
+
+/**
+ * 一个会话的待发队列视图。
+ *
+ * `steerSupported` 来自服务端：不是所有运行形态都能被"插话"。宁可不给入口，
+ * 也不要给一个必然失败的按钮。`error` 是入队/删除失败的一句话——队列失败必须
+ * 说出来，用户以为排上了而实际没有是最坏的情况。
+ */
+export interface QueueView {
+  items: QueueItem[];
+  steerSupported: boolean;
+  /**
+   * 服务端有没有队列端点。`unknown` = 还没探测。
+   *
+   * 这个字段不是"锦上添花"：实测部署版本对 `/queue` 一律 404，而桌面端在同一个
+   * 部署上也没有队列功能。探测到 `no` 之后，运行中的发送按钮回到"停止"语义
+   * （与桌面端一致），而不是给一个必然失败的入口。
+   */
+  support: QueueSupport;
+  error: string | null;
+}
+
+const EMPTY_QUEUE: QueueView = {
+  items: [],
+  steerSupported: false,
+  support: 'unknown',
+  error: null,
+};
+
+/**
+ * 一次提交的结果。调用方据 `sent` / `queued` 清草稿，其余都把草稿留着——
+ * 用户写的话不能因为一次失败就丢掉。
+ */
+export type SubmitResult = 'sent' | 'queued' | 'failed' | 'busy' | 'unavailable';
 
 type Action =
   | { type: 'signedOut' }
@@ -92,6 +137,7 @@ type Action =
   | { type: 'openSession'; sessionId: string }
   | { type: 'closeSession' }
   | { type: 'chat'; sessionId: string; update: (chat: ChatState) => ChatState }
+  | { type: 'queue'; sessionId: string; view: QueueView }
   | { type: 'connection'; state: ConnectionState }
   | { type: 'error'; message: string | null };
 
@@ -103,6 +149,7 @@ const initialState: UiState = {
   sessions: [],
   sessionsLoading: false,
   chats: {},
+  queues: {},
   currentSessionId: null,
   connection: 'idle',
   error: null,
@@ -141,6 +188,8 @@ function reducer(state: UiState, action: Action): UiState {
       const current = state.chats[action.sessionId] ?? initialChatState;
       return { ...state, chats: { ...state.chats, [action.sessionId]: action.update(current) } };
     }
+    case 'queue':
+      return { ...state, queues: { ...state.queues, [action.sessionId]: action.view } };
     case 'connection':
       return { ...state, connection: action.state };
     case 'error':
@@ -171,8 +220,20 @@ interface SessionContextValue {
   openSession: (sessionId: string) => void;
   closeSession: () => void;
   chatFor: (sessionId: string) => ChatState;
-  /** 返回 invocation_id；null 表示发不出去（没有实时通道）。 */
-  sendMessage: (text: string) => string | null;
+  /**
+   * 提交一句话。**运行中会入队**（follow-up），空闲时才真的开一轮——这是
+   * "agent 还在跑，我再补一句"的落点（上游同一个按钮的同一套语义）。
+   *
+   * 返回结果而不是 invocation_id：入队是异步的，调用方必须知道到底排上了没有，
+   * 才能决定要不要清草稿。
+   */
+  submit: (text: string) => Promise<SubmitResult>;
+  /** 某个会话的待发队列（没有就是空队列）。 */
+  queueFor: (sessionId: string) => QueueView;
+  /** 删掉一条队列项（用户改主意）。 */
+  removeQueueItem: (item: QueueItem) => Promise<void>;
+  /** 把 follow-up 提成 steer（别等它跑完，现在就告诉它）。 */
+  promoteQueueItem: (item: QueueItem) => Promise<void>;
   abort: () => void;
   respondApproval: (optionId: string) => void;
   /** 回应 agent 的提问：给答案，或显式取消（两者都会发出 `user_input_response`）。 */
@@ -202,6 +263,8 @@ export function SessionProvider({
 
   const realtimeRef = useRef<MemohRealtime | null>(null);
   const stateRef = useRef(state);
+  /** 一个 provider 一个闸门：它记的是"这个界面有没有手势在飞"。 */
+  const gate = useRef(new QueueSubmissionGate(() => uuid())).current;
   stateRef.current = state;
   /** sessionId → 上一次渲染时是否在跑。用来捕捉"跑完了"这个边沿。 */
   const prevRunningRef = useRef<Record<string, boolean>>({});
@@ -317,6 +380,55 @@ export function SessionProvider({
   }, []);
 
   /**
+   刷新一个会话的队列（服务端持有，客户端只读）。
+   
+   失败不弹错：读队列失败不代表用户的操作失败，界面回到"没有待发项"就够了；
+   真正需要说的是**写**失败（入队/删除），那在各自的调用点报。
+   */
+  const refreshQueue = useCallback(async (sessionId: string) => {
+    const { client, currentBotId, queues } = stateRef.current;
+    if (client === null || currentBotId === null) return;
+    // 已经探测出服务端没有队列端点，就别再打了（否则每个会话都要白跑一次 404）。
+    if (queues[sessionId]?.support === 'no') return;
+    try {
+      const result = await client.getSessionQueue(currentBotId, sessionId);
+      dispatch({
+        type: 'queue',
+        sessionId,
+        view: {
+          items: visibleQueueItems([...result.followUp, ...result.steer]),
+          steerSupported: result.steerSupported,
+          support: 'yes',
+          error: null,
+        },
+      });
+    } catch (error) {
+      // 404 = 这个服务端版本没有队列端点。那是**能力结论**，不是故障：
+      // 记下来，界面据此回到"运行中=停止"的语义（与桌面端一致），也不再重试。
+      if (error instanceof ApiError && error.status === 404) {
+        dispatch({
+          type: 'queue',
+          sessionId,
+          view: { ...(queues[sessionId] ?? EMPTY_QUEUE), items: [], support: 'no', error: null },
+        });
+        return;
+      }
+      // 其余错误是暂时的：保持现状（清空会让用户以为排队的东西丢了）。
+    }
+  }, []);
+
+  const queueFailure = useCallback((sessionId: string, error: unknown) => {
+    dispatch({
+      type: 'queue',
+      sessionId,
+      view: {
+        ...(stateRef.current.queues[sessionId] ?? EMPTY_QUEUE),
+        error: describeError(error),
+      },
+    });
+  }, []);
+
+  /**
    * 拉一次会话历史。
    *
    * 打开会话时要拉，**run 结束后也要拉**——因为运行期间服务端不一定给用户轮次
@@ -368,8 +480,10 @@ export function SessionProvider({
     if (client === null || currentSessionId === null) return;
     void ensureSessionInList(currentSessionId);
     void refreshHistory(currentSessionId);
+    // 队列是服务端持有的：换会话必须重新拉，不能用上一个会话的残留。
+    void refreshQueue(currentSessionId);
     realtimeRef.current?.subscribe(currentSessionId);
-  }, [state.client, state.currentSessionId, refreshHistory, ensureSessionInList]);
+  }, [state.client, state.currentSessionId, refreshHistory, ensureSessionInList, refreshQueue]);
 
   /**
    * 兜住"owner 已经死了但投影还停在 running"的情况。
@@ -402,8 +516,32 @@ export function SessionProvider({
     const wasRunning = prevRunningRef.current[currentSessionId] === true;
     prevRunningRef.current[currentSessionId] = chat.running;
 
-    if (wasRunning && !chat.running) void refreshHistory(currentSessionId);
-  }, [state.chats, state.currentSessionId, refreshHistory]);
+    if (wasRunning && !chat.running) {
+      void refreshHistory(currentSessionId);
+      // run 结束 = 队列被消费的时机：follow-up 这时候才开始跑。
+      void refreshQueue(currentSessionId);
+    }
+  }, [state.chats, state.currentSessionId, refreshHistory, refreshQueue]);
+
+  /**
+   运行中定期对齐队列（兜底）。
+   
+   主要触发点是事件（入队、删除、run 状态变化）；这个定时器只覆盖"服务端把一条
+   follow-up 取走执行了、而客户端没接到任何帧"的情况。上游同样有一个 10s 兜底
+   （`QUEUE_FALLBACK_REFRESH_MS`），理由相同：让"还在排队"这件事不会永远显示下去。
+   */
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const { currentSessionId, chats, queues } = stateRef.current;
+      if (currentSessionId === null) return;
+      const pending = queues[currentSessionId]?.items.length ?? 0;
+      if (pending === 0) return;
+      // 只在"有东西排队"时才轮询——空队列不用一直打服务端。
+      void refreshQueue(currentSessionId);
+      void chats;
+    }, 10_000);
+    return () => clearInterval(timer);
+  }, [refreshQueue]);
 
   // ------------------------------------------------------------ 动作
 
@@ -423,19 +561,116 @@ export function SessionProvider({
     [state.chats],
   );
 
-  const sendMessage = useCallback((text: string): string | null => {
-    const { currentSessionId, chats } = stateRef.current;
-    const realtime = realtimeRef.current;
-    if (realtime === null || currentSessionId === null) return null;
-    void chats;
-    const invocationId = realtime.sendMessage({ sessionId: currentSessionId, text });
-    dispatch({
-      type: 'chat',
-      sessionId: currentSessionId,
-      update: (chat) => appendOptimisticUserMessage(chat, text, invocationId),
-    });
-    return invocationId;
-  }, []);
+  const submit = useCallback(
+    async (text: string): Promise<SubmitResult> => {
+      const { currentSessionId, chats, client, currentBotId, queues } = stateRef.current;
+      const realtime = realtimeRef.current;
+      if (currentSessionId === null) return 'unavailable';
+      const trimmed = text.trim();
+      if (trimmed === '') return 'unavailable';
+
+      const chat = chats[currentSessionId];
+      const running = chat !== undefined && isRunActive(chat.runStatus);
+
+      // 空闲：正常开一轮（走实时通道）。
+      if (!running) {
+        if (realtime === null) return 'unavailable';
+        const invocationId = realtime.sendMessage({ sessionId: currentSessionId, text: trimmed });
+        dispatch({
+          type: 'chat',
+          sessionId: currentSessionId,
+          update: (state) => appendOptimisticUserMessage(state, trimmed, invocationId),
+        });
+        // 开了新一轮，队列里可能还有上一轮排下的东西——刷一次看服务端怎么算的。
+        void refreshQueue(currentSessionId);
+        return 'sent';
+      }
+
+      // 运行中：入队（follow-up）。这句话会在这一轮跑完后被执行。
+      if (client === null || currentBotId === null) return 'unavailable';
+      const submission = gate.begin({
+        sessionId: currentSessionId,
+        mode: 'follow-up',
+        text: trimmed,
+      });
+      // 上一个手势还在飞：直接拒绝。同一次双击不能入两条。
+      if (submission === null) return 'busy';
+      try {
+        await client.enqueueFollowUp(
+          currentBotId,
+          currentSessionId,
+          trimmed,
+          submission.invocationId,
+        );
+        gate.succeed(submission);
+        dispatch({
+          type: 'queue',
+          sessionId: currentSessionId,
+          view: { ...(queues[currentSessionId] ?? EMPTY_QUEUE), support: 'yes', error: null },
+        });
+        // 乐观放一条进去，等服务端列表回来再对齐（否则用户会以为没排上而再点一次）。
+        dispatch({
+          type: 'queue',
+          sessionId: currentSessionId,
+          view: {
+            items: [
+              ...(queues[currentSessionId]?.items ?? []),
+              {
+                itemId: `local-${submission.invocationId}`,
+                text: trimmed,
+                position: Number.MAX_SAFE_INTEGER,
+                status: 'accepted',
+                kind: 'follow-up' as const,
+              },
+            ],
+            steerSupported: queues[currentSessionId]?.steerSupported ?? false,
+            support: 'yes',
+            error: null,
+          },
+        });
+        void refreshQueue(currentSessionId);
+        return 'queued';
+      } catch (error) {
+        gate.fail(submission);
+        queueFailure(currentSessionId, error);
+        return 'failed';
+      }
+    },
+    [queueFailure, refreshQueue],
+  );
+
+  const removeQueueItem = useCallback(
+    async (item: QueueItem) => {
+      const { currentSessionId, client, currentBotId } = stateRef.current;
+      if (client === null || currentBotId === null || currentSessionId === null) return;
+      try {
+        await client.deleteQueueItem(currentBotId, currentSessionId, item.kind, item.itemId);
+        await refreshQueue(currentSessionId);
+      } catch (error) {
+        queueFailure(currentSessionId, error);
+      }
+    },
+    [queueFailure, refreshQueue],
+  );
+
+  const promoteQueueItem = useCallback(
+    async (item: QueueItem) => {
+      const { currentSessionId, client, currentBotId } = stateRef.current;
+      if (client === null || currentBotId === null || currentSessionId === null) return;
+      try {
+        await client.promoteQueueItem(currentBotId, currentSessionId, item.itemId);
+        await refreshQueue(currentSessionId);
+      } catch (error) {
+        queueFailure(currentSessionId, error);
+      }
+    },
+    [queueFailure, refreshQueue],
+  );
+
+  const queueFor = useCallback(
+    (sessionId: string): QueueView => stateRef.current.queues[sessionId] ?? EMPTY_QUEUE,
+    [],
+  );
 
   const abort = useCallback(() => {
     const { currentSessionId, chats } = stateRef.current;
@@ -524,7 +759,10 @@ export function SessionProvider({
       openSession,
       closeSession,
       chatFor,
-      sendMessage,
+      submit,
+      queueFor,
+      removeQueueItem,
+      promoteQueueItem,
       abort,
       respondApproval,
       respondUserInput,
@@ -541,7 +779,10 @@ export function SessionProvider({
       openSession,
       closeSession,
       chatFor,
-      sendMessage,
+      submit,
+      queueFor,
+      removeQueueItem,
+      promoteQueueItem,
       abort,
       respondApproval,
       respondUserInput,

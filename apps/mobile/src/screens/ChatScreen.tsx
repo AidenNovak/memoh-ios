@@ -20,6 +20,8 @@ import { useT } from '../lib/i18n/useT.ts';
 import { radius, radiusStyle } from '../lib/theme/tokens.ts';
 import { usePalette, useTheme } from '../lib/theme/context.tsx';
 import { ApprovalSheet } from '../ui/ApprovalSheet.tsx';
+import { composerActionWithSupport } from '../features/chat/queue.ts';
+import { QueueStrip } from '../ui/QueueStrip.tsx';
 import { UserInputSheet } from '../ui/UserInputSheet.tsx';
 
 export function ChatScreen() {
@@ -37,7 +39,10 @@ export function ChatScreen() {
     state,
     openSession,
     closeSession,
-    sendMessage,
+    submit,
+    queueFor,
+    removeQueueItem,
+    promoteQueueItem,
     abort,
     chatFor,
     respondApproval,
@@ -64,8 +69,36 @@ export function ChatScreen() {
   );
 
   const [draft, setDraft] = useState('');
-  /** 有没有"可以发"的内容：正在生成时按钮是停止，永远可用。 */
-  const canSend = chat.running || draft.trim() !== '';
+  const queue = queueFor(isNew ? '' : sessionId);
+
+  /**
+   运行中按钮的语义（与上游同一个圆按钮一致，见 chat-pane 的 handleSendButton）：
+   
+   - **有文字**：这句话排进队列（follow-up，这一轮跑完再跑）；
+   - **没文字**：停止这一轮。
+   
+   所以 `canSend` 不再等于"正在生成"——正在生成且有文字时它也能点，而那时点下去
+   是**排队**而不是停止。之前是"运行中一律停止"，于是用户想补一句只能先打断，
+   而"补一句"恰恰是人在外面最常见的动作。
+   */
+  const hasDraft = draft.trim() !== '';
+  // 运行中：支持队列时有文字也能点（排队）；不支持时保持"运行中=停止"（与桌面端一致）。
+  const canSend = hasDraft || chat.running;
+  /** 按钮此刻是什么：排队 / 停止。这决定字形，也决定无障碍标签。 */
+  /**
+   按钮此刻是什么：发送 / 排队 / 停止。判定在纯逻辑里（`composerActionWithSupport`）——
+   它依赖"这个服务端到底支不支持队列"。实测部署版本不支持，那时运行中的按钮必须
+   回到"停止"语义（与同一部署的桌面端一致），而不是给一个必然失败的入口。
+   */
+  const action = composerActionWithSupport({
+    running: chat.running,
+    hasDraft,
+    support: queue.support,
+  });
+  // 无障碍标签要说清这一下会发生什么："排队"和"发送"对用户是两件事。
+  let sendLabel = t('chat.send');
+  if (action === 'stop') sendLabel = t('chat.stop');
+  else if (action === 'queue') sendLabel = t('queue.send');
   const turnsJson = useMemo(() => JSON.stringify(turns), [turns]);
 
   /**
@@ -89,10 +122,11 @@ export function ChatScreen() {
   const onSend = useCallback(() => {
     const text = draft.trim();
     if (text === '') return;
-    const invocationId = sendMessage(text);
-    if (invocationId === null) return;
-    setDraft('');
-  }, [draft, sendMessage]);
+    // 草稿**先留着**：只有真的发出去（或排上了）才清。失败还留着，用户不用重写。
+    void submit(text).then((result) => {
+      if (result === 'sent' || result === 'queued') setDraft('');
+    });
+  }, [draft, submit]);
 
   return (
     <KeyboardAvoidingView
@@ -196,6 +230,9 @@ export function ChatScreen() {
         在别处冒出一个红色胶囊既不像系统控件也遮挡内容。形状不变、只换字形，
         所以中途不会闪。
       */}
+      {/* 待发队列：还没有发出去的话，排在 composer 正上方（不是消息流里）。 */}
+      <QueueStrip queue={queue} onRemove={removeQueueItem} onPromote={promoteQueueItem} />
+
       {/*
         agent 提问期间**隐藏输入区**：提问是"当前待办"，与 composer 争同一个位置
         只会让人不知道该用哪个（上游 Web 也是表单接管 composer）。
@@ -239,9 +276,9 @@ export function ChatScreen() {
           />
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={chat.running ? t('chat.stop') : t('chat.send')}
-            disabled={!chat.running && draft.trim() === ''}
-            onPress={chat.running ? abort : onSend}
+            accessibilityLabel={sendLabel}
+            disabled={!canSend}
+            onPress={action === 'stop' ? abort : onSend}
             style={({ pressed }) => [
               styles.send,
               {
@@ -259,7 +296,8 @@ export function ChatScreen() {
                 },
               ]}
             >
-              {chat.running ? '■' : '↑'}
+              {/* 形状不变、只换字形：同一个位置，中途不会闪（既有评审结论）。 */}
+              {action === 'stop' ? '■' : '↑'}
             </Text>
           </Pressable>
         </View>

@@ -18,7 +18,7 @@ import { watchVerifyNavigation } from './seed.ts';
 import { useSession } from '../session/store.tsx';
 
 export function VerifyPlanRunner({ verify }: { verify: VerifyBootstrap | null }) {
-  const { state, selectBot, openSession, sendMessage } = useSession();
+  const { state, selectBot, openSession, submit } = useSession();
   const router = useRouter();
   const started = useRef(false);
   /**
@@ -94,7 +94,7 @@ export function VerifyPlanRunner({ verify }: { verify: VerifyBootstrap | null })
       if (plan.scenario === 'chat' && typeof plan.message === 'string') {
         // 等实时通道订阅完成（收到 snapshot）再发，否则正文收不到。
         await new Promise((resolve) => setTimeout(resolve, 2_500));
-        sendMessage(plan.message);
+        await submit(plan.message);
       }
     })();
   }, [
@@ -106,7 +106,7 @@ export function VerifyPlanRunner({ verify }: { verify: VerifyBootstrap | null })
     state.client,
     selectBot,
     openSession,
-    sendMessage,
+    submit,
     router,
   ]);
 

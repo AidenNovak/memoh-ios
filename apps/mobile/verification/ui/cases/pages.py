@@ -74,6 +74,16 @@ PAGES = (
         # 所以断言的是聚合后的措辞，不是某条原始命令——原始命令在展开里才看得到。
         'expect': ['Ran commands'],
     },
+    {
+        'name': 'chat-queue',
+        'title': '对话页：待发队列（运行中排队的话）',
+        'route': '/chat/fixture-session-active',
+        # 队列是 REST 拉的（不是协议帧），所以这条依赖 fixture 服务端的 /queue 返回
+        # 固定数据。断言 'Queued' 与 'Steering' 两个 kind 标签：它们只有真的渲染出
+        # 队列条时才在屏幕上，能同时证明"拉了队列"和"分得清两条队列"。
+        'scenario': 'queue',
+        'expect': ['Queued', 'Steering'],
+    },
 )
 
 
