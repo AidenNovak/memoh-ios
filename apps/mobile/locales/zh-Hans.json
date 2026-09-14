@@ -95,6 +95,7 @@
   "sessionInfo.group.session": "会话",
   "sessionInfo.hitRate": "缓存命中率",
   "sessionInfo.input": "输入 token",
+  "sessionInfo.loadFailed": "读不到会话信息，检查网络后重试。",
   "sessionInfo.loading": "读取中…",
   "sessionInfo.messages": "消息数",
   "sessionInfo.noWindowFooter": "这台服务端不提供上下文窗口，因此不显示百分比——只报真实统计到的绝对值。",

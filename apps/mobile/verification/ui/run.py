@@ -101,6 +101,17 @@ CASES = {
         # 需要本地起一个固定服务端（verification/fixture/server.mjs）。
         requires_fixture=True,
     ),
+    'chat-info': Case(
+        name='chat-info',
+        batch='live',
+        description='连真实服务端打开会话信息面板：断言显示的是服务端真实数据，且无窗口时不给百分比',
+        script=CASES_DIR / 'chat-info.py',
+        # 关键证据是面板那一屏：数字来自服务端，不是场景台的固定值。
+        screenshots=('panel', 'verified'),
+        scene='真实服务端 /status → 会话信息面板（需要 pnpm dev:env 隧道）',
+        timeout=420,
+        requires_live=True,
+    ),
     'chat-roundtrip': Case(
         name='chat-roundtrip',
         batch='live',
@@ -117,7 +128,7 @@ BATCHES = {
     'launch': ['app-launch'],
     'scenes': ['scenes'],
     'pages': ['pages'],
-    'live': ['chat-roundtrip'],
+    'live': ['chat-roundtrip', 'chat-info'],
 }
 
 

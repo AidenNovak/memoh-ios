@@ -242,7 +242,10 @@ interface SessionContextValue {
   queueFor: (sessionId: string) => QueueView;
   /** 某个会话的信息（消息数 / 上下文用量 / cache）。null = 还没取到。 */
   sessionStatusFor: (sessionId: string) => SessionStatus | null;
-  /** 主动刷一次会话信息（打开面板前调）。 */
+  /**
+   主动刷一次会话信息（打开面板前调）。
+   失败会抛错——面板要能告诉用户"这次没读到"，而不是弹出一个空面板。
+   */
   refreshSessionStatus: (sessionId: string) => Promise<void>;
   /** 删掉一条队列项（用户改主意）。 */
   removeQueueItem: (item: QueueItem) => Promise<void>;
@@ -436,19 +439,22 @@ export function SessionProvider({
 
   /**
    拉一次会话信息。
-   
-   失败不弹错：它**不影响任何操作**，只是面板里少几行。而且这台部署的 /status 是
-   有的（实测 200），真失败多半是暂时的网络抖动——下次打开面板会再试。
+
+   失败时**把错误抛给调用者**，因为它该被两种人区别对待：
+
+     - 后台刷新（进会话、每轮 run 结束）：静默。它不影响任何操作，读不到就是面板
+       里少几行；而且这台部署的 /status 是有的（实测 200），真失败多半是暂时的
+       网络抖动，下次会再试。调用点用 `.catch(() => {})` 吞掉。
+     - 用户点开面板：要说话。否则面板弹出来是**空的、且永远不解释为什么空**——
+       用户以为功能坏了，而其实只是这一次请求没成功。
+
+   抛错但**不动已存的值**：清掉会让面板突然空掉，比留着上一次的数更像故障。
    */
   const refreshSessionStatus = useCallback(async (sessionId: string) => {
     const { client, currentBotId } = stateRef.current;
     if (client === null || currentBotId === null) return;
-    try {
-      const status = await client.getSessionStatus(currentBotId, sessionId);
-      dispatch({ type: 'sessionStatus', sessionId, status });
-    } catch {
-      // 读不到就保持上一次的值（清掉会让面板突然空掉，比旧值更像故障）。
-    }
+    const status = await client.getSessionStatus(currentBotId, sessionId);
+    dispatch({ type: 'sessionStatus', sessionId, status });
   }, []);
 
   const sessionStatusFor = useCallback(
@@ -521,7 +527,7 @@ export function SessionProvider({
     void refreshHistory(currentSessionId);
     // 队列与会话信息都是服务端持有的：换会话必须重新拉，不能用上一个会话的残留。
     void refreshQueue(currentSessionId);
-    void refreshSessionStatus(currentSessionId);
+    void refreshSessionStatus(currentSessionId).catch(() => {});
     realtimeRef.current?.subscribe(currentSessionId);
   }, [
     state.client,
@@ -568,7 +574,7 @@ export function SessionProvider({
       // run 结束 = 队列被消费的时机：follow-up 这时候才开始跑。
       void refreshQueue(currentSessionId);
       // 用量在每一轮之后变化最明显，这时刷新才有意义。
-      void refreshSessionStatus(currentSessionId);
+      void refreshSessionStatus(currentSessionId).catch(() => {});
     }
   }, [state.chats, state.currentSessionId, refreshHistory, refreshQueue, refreshSessionStatus]);
 

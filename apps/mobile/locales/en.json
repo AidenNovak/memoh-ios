@@ -95,6 +95,7 @@
   "sessionInfo.group.session": "Session",
   "sessionInfo.hitRate": "Cache hit rate",
   "sessionInfo.input": "Input tokens",
+  "sessionInfo.loadFailed": "Couldn't read session info. Check your connection and try again.",
   "sessionInfo.loading": "Loading…",
   "sessionInfo.messages": "Messages",
   "sessionInfo.noWindowFooter": "This server doesn't report a context window, so a percentage can't be shown. Only the absolute count is real.",

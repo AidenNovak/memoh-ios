@@ -37,88 +37,21 @@ import time
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
+sys.path.insert(0, str(HERE))
 from driver import Driver, DriverError  # noqa: E402
 
-ENV_PATH = Path.home() / '.config' / 'memoh-ios' / 'dev.env'
 SEED_NAME = 'memoh-verify-seed.json'
 PROMPT = 'Say exactly: pong'
 # 模型被明确要求回这两个字；OCR 认错一两个字母也不影响判定，只要出现它就算过。
 EXPECTED = ('pong',)
 
-
-def fail(message):
-    print(f'FAILED: {message}', file=sys.stderr, flush=True)
-    raise SystemExit(1)
-
-
-def load_env():
-    env = {}
-    if not ENV_PATH.exists():
-        return env
-    for line in ENV_PATH.read_text(encoding='utf-8').splitlines():
-        line = line.strip()
-        if not line or line.startswith('#') or '=' not in line:
-            continue
-        key, value = line.split('=', 1)
-        env[key] = value
-    return env
-
-
-def launch_arguments(port, language):
-    """与 app-launch 一致：真正要的是 App 的首屏，不是 dev launcher 的工具界面。"""
-    return [
-        '--initialUrl', f'http://127.0.0.1:{port}?disableOnboarding=1',
-        '-expo.devlauncher.hasGrantedNetworkPermission', 'YES',
-        '-EXDevMenuShowsAtLaunch', 'NO',
-        '-EXDevMenuIsOnboardingFinished', 'YES',
-        '-EXDevMenuShowFloatingActionButton', 'NO',
-        '-AppleLanguages', f'({language})',
-        '-AppleLocale', 'en_US' if language == 'en' else 'zh_CN',
-        '-AppleKeyboards', '(en_US@sw=QWERTY)',
-    ]
-
-
-def write_seed(driver, base_url, password):
-    """把种子放进 App 的 Documents。必须在启动前写入。"""
-    documents = driver.container('data') / 'Documents'
-    documents.mkdir(parents=True, exist_ok=True)
-    seed_path = documents / SEED_NAME
-    seed_path.write_text(
-        json.dumps(
-            {
-                'baseUrl': base_url,
-                'username': 'admin',
-                'password': password,
-                'scenario': 'chat',
-                'message': PROMPT,
-            },
-            ensure_ascii=False,
-        ),
-        encoding='utf-8',
-    )
-    return seed_path
-
-
-def preflight(base_url):
-    """先确认服务端真的可达。
-
-    没有这一步，隧道的断裂会伪装成"某个 UI 元素没出现"，读日志的人会去查 App 的
-    渲染，而真正的问题是网络。验收脚本有责任把失败归因到正确的地方。
-    """
-    import urllib.error
-    import urllib.request
-
-    probe = f'{base_url.rstrip("/")}/bots'
-    try:
-        # 401 也算可达：说明服务端在响应，只是没带凭据。
-        urllib.request.urlopen(probe, timeout=8)
-    except urllib.error.HTTPError:
-        return
-    except Exception as error:  # noqa: BLE001 - 任何连不上都算不可达
-        fail(
-            f'服务端不可达：{probe} —— {error}\n'
-            '先跑 `pnpm dev:env` 建立隧道，再用 `pnpm dev:env` 的状态确认它是活的。'
-        )
+from roundtrip_common import (  # noqa: E402 - 需要先把 cases 目录加进 sys.path
+    fail,
+    preflight,
+    require_env,
+    launch_arguments,
+    write_seed,
+)
 
 
 def parse_arguments(argv):
@@ -142,14 +75,7 @@ def main(argv=None):
     if not arguments.udid:
         fail('no Simulator: pass --udid or run this through pnpm verify:ui')
 
-    env = load_env()
-    base_url = env.get('MEMOH_DEV_BASE_URL')
-    password = env.get('MEMOH_ADMIN_PASSWORD')
-    if not base_url or not password:
-        fail(
-            f'{ENV_PATH} 缺 MEMOH_DEV_BASE_URL 或 MEMOH_ADMIN_PASSWORD；'
-            '先跑 pnpm dev:env，见 docs/environment.md'
-        )
+    base_url, password = require_env()
 
     # 先证明服务端活着，否则后面的失败会指向错误的方向。
     preflight(base_url)
@@ -167,7 +93,10 @@ def main(argv=None):
         driver.install()
         # 先清钥匙串：上一次跑 case 留下的凭据会跨安装存活。
         driver.reset_keychain()
-        seed_path = write_seed(driver, base_url, password)
+        # 种子必须带上要发的那句话——`write_seed` 的公共部分只管登录与场景，
+        # 场景自己的参数走 `extra`。（重构共用模块时漏过这一项，结果 case "通过"了
+        # 前两步却永远等不到回复：它压根没发消息。）
+        seed_path = write_seed(driver, base_url, password, extra={'message': PROMPT})
 
         driver.terminate()
         driver.launch(launch_arguments(arguments.metro_port, arguments.language))
@@ -185,11 +114,19 @@ def main(argv=None):
         driver.wait_for_text(('Message',), timeout=90)
         driver.capture('composer')
 
-        # 3) 核心断言。
+        # 3) 自己那句话真的发出去了——屏幕上能看到它。
+        #
+        #    这一步是为了**把失败归因分清楚**：没有它的话，"消息根本没发出去"会表现成
+        #    "等回复等到超时"，读日志的人会去查模型或服务端，而真正的问题是种子
+        #    （真发生过：重构时漏传 message，case 白等三分钟）。
+        prompt_head = PROMPT.split(':')[0]
+        driver.wait_for_text((prompt_head,), timeout=60, capture_name='sent')
+
+        # 4) 核心断言。
         driver.wait_for_text(EXPECTED, timeout=arguments.timeout)
         driver.capture('reply')
 
-        # 4) 稳定态：run 结束后"停止"按钮消失。
+        # 5) 稳定态：run 结束后"停止"按钮消失。
         #    发送按钮是一个 ↑ 字形，OCR 读不出有意义的文本，所以断言"停止"消失，
         #    而不是"发送"出现——后者永远不可能通过。
         deadline = time.monotonic() + 90

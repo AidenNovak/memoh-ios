@@ -21,7 +21,15 @@
  * 现成的就用现成的"，而且这类"读数值"的界面本来就不该有自绘的图表腔调。
  */
 import React from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { SessionStatus } from '../models/chat.ts';
@@ -51,7 +59,17 @@ export function SessionInfoSheet({
   const palette = usePalette();
   const { spacing, radius, typography } = useTheme();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const t = useT();
+
+  /**
+   * 内容区能用多高。
+   *
+   * 必须**按可用空间算**而不是写死一个数：写死的话（之前是 460）在窗口给到
+   * `context_window` 时行数变多，最后一行会被弹窗边缘从中间裁掉——看起来像坏了，
+   * 而用户未必知道能滚。按屏高算之后，常见内容一屏放得下，真的更长才进入滚动。
+   */
+  const contentMaxHeight = Math.max(240, windowHeight * 0.85 - (insets.bottom + 120));
 
   if (!visible) return null;
   const view = sessionInfoView(status);
@@ -100,7 +118,7 @@ export function SessionInfoSheet({
           </View>
 
           <ScrollView
-            style={{ maxHeight: 460 }}
+            style={{ maxHeight: contentMaxHeight }}
             contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingTop: spacing.md }}
           >
             {error !== null ? (

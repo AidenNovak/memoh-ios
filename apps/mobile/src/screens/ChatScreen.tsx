@@ -26,7 +26,7 @@ import { SessionInfoSheet } from '../ui/SessionInfoSheet.tsx';
 import { UserInputSheet } from '../ui/UserInputSheet.tsx';
 
 export function ChatScreen() {
-  const params = useLocalSearchParams<{ sessionId: string }>();
+  const params = useLocalSearchParams<{ sessionId: string; info?: string }>();
   const sessionId = params.sessionId;
   const isNew = sessionId === 'new';
 
@@ -74,6 +74,17 @@ export function ChatScreen() {
   const [draft, setDraft] = useState('');
   const queue = queueFor(isNew ? '' : sessionId);
   const [infoOpen, setInfoOpen] = useState(false);
+  /**
+   面板的取数状态。
+
+   为什么要有它：面板是"点开就想看到数"的东西，而 `/status` 是异步的。之前把
+   `loading` 写死成 false，结果是**面板弹出来空的、而且永远不解释为什么空**——
+   用户只会以为功能坏了。验收的 chat-info 就是在这个空档里断言失败，才暴露出来。
+   */
+  const [infoState, setInfoState] = useState<{ loading: boolean; failed: boolean }>({
+    loading: false,
+    failed: false,
+  });
   const sessionStatus = sessionStatusFor(isNew ? '' : sessionId);
 
   /**
@@ -127,8 +138,25 @@ export function ChatScreen() {
   /** 打开会话信息面板。先刷新一次——面板里的数字是"现在的"，不该是进会话时的。 */
   const openInfo = useCallback(() => {
     setInfoOpen(true);
-    if (!isNew) void refreshSessionStatus(sessionId);
+    if (isNew) return;
+    setInfoState({ loading: true, failed: false });
+    void (async () => {
+      try {
+        await refreshSessionStatus(sessionId);
+        setInfoState({ loading: false, failed: false });
+      } catch {
+        // 说清楚"这次没读到"，而不是留一个空面板。
+        setInfoState({ loading: false, failed: true });
+      }
+    })();
   }, [isNew, refreshSessionStatus, sessionId]);
+
+  // `?info=1`：验收种子要求进来就打开面板（模拟器没有点击能力）。
+  // 走的是上面同一个处理函数，所以验的是产品的真实路径。
+  useEffect(() => {
+    if (params.info !== '1' || isNew) return;
+    openInfo();
+  }, [params.info, isNew, openInfo]);
 
   const onSend = useCallback(() => {
     const text = draft.trim();
@@ -337,8 +365,10 @@ export function ChatScreen() {
       <SessionInfoSheet
         visible={infoOpen}
         status={sessionStatus}
-        loading={false}
-        error={null}
+        loading={infoState.loading}
+        // 已经显示到数的会话不该因为一次失败的刷新变成一片红：失败提示只在
+        // 面板里真的没有数可看时才给。
+        error={infoState.failed && sessionStatus === null ? t('sessionInfo.loadFailed') : null}
         onClose={() => setInfoOpen(false)}
       />
     </KeyboardAvoidingView>

@@ -74,7 +74,8 @@ export function VerifyPlanRunner({ verify }: { verify: VerifyBootstrap | null })
       const client = state.client;
       if (client === null) return;
 
-      let sessionId = state.sessions[0]?.id;
+      // 优先用种子指定的会话（验收要挑"有内容的"那个）；否则最近的一个。
+      let sessionId = typeof plan.sessionId === 'string' ? plan.sessionId : state.sessions[0]?.id;
       if (sessionId === undefined) {
         try {
           const candidate = createdSessionId(
@@ -89,7 +90,13 @@ export function VerifyPlanRunner({ verify }: { verify: VerifyBootstrap | null })
 
       openSession(sessionId);
       // 走到对话页——脚本化动作也要让界面处于产品路径上，截图才有意义。
-      router.push(`/chat/${sessionId}`);
+      //
+      // `?info=1` 让对话页把会话信息面板打开（面板本是点标题才出现的）。
+      // 用查询参数而不是"直接调 store"：面板的开合状态属于 ChatScreen，
+      // 从外面改它就得把状态提上去——为验收改产品结构不值得。
+      router.push(
+        plan.openSessionInfo === true ? `/chat/${sessionId}?info=1` : `/chat/${sessionId}`,
+      );
 
       if (plan.scenario === 'chat' && typeof plan.message === 'string') {
         // 等实时通道订阅完成（收到 snapshot）再发，否则正文收不到。
