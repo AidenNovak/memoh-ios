@@ -35,3 +35,7 @@ secrets/
 .DS_Store
 *.log
 tmp/
+
+# Python 缓存
+__pycache__/
+*.pyc
