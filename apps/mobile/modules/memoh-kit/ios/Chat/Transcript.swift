@@ -272,6 +272,14 @@ enum SurfaceToken: Equatable, Sendable {
 // Foundation-only policy shared by production layout and non-hosted XCTest.
 enum MessageListMetrics {
   static let blockSpacing: Double = 16
+  /**
+   活动行（工具/思考）相对正文的左内缩。
+
+   列表 section inset 已是 16，正文从 16 开始；活动行再内缩 8 → 相对屏幕
+   24pt，对齐 lody-ios 的 `ChatCell.leading`（tool/thought = 24）。层级：
+   正文贴左是结论，活动内缩是过程。
+   */
+  static let activityInset: Double = 8
   static let inputCharacterLimit = 600
   static let inputLineLimit = 5
 

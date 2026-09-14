@@ -11,6 +11,17 @@ class MessageBlockCell: UICollectionViewCell {
   private var leading: NSLayoutConstraint!
   private var userWidth: NSLayoutConstraint!
   private var user = false
+  /**
+   活动行（工具/思考）相对正文的**左内缩**。
+
+   对齐 lody-ios 的 `ChatCell.leading`：正文（text）贴左 0，活动行（thought/
+   tool）缩进后相对屏幕约 24pt。本列表的 section inset 已是 16，所以 cell 内
+   加 8pt 即可。正文 16 / 活动 24 的错位让「工具与思考属于这轮 agent 的干活
+   过程、正文是它的结论」一眼可读（R2 评审第 2 项）。
+   */
+  var leadingInset: CGFloat = 0 {
+    didSet { leading?.constant = leadingInset }
+  }
   private var borderColor: UIColor = .clear
 
   override init(frame: CGRect) {
@@ -35,7 +46,7 @@ class MessageBlockCell: UICollectionViewCell {
     stack.addArrangedSubview(body)
     stack.translatesAutoresizingMaskIntoConstraints = false
     contentView.addSubview(stack)
-    leading = stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor)
+    leading = stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: leadingInset)
     NSLayoutConstraint.activate([
       stack.topAnchor.constraint(equalTo: contentView.topAnchor),
       stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
@@ -181,6 +192,8 @@ final class ReasoningMessageCell: MessageBlockCell {
 
   override init(frame: CGRect) {
     super.init(frame: frame)
+    // 思考是过程不是结论，与工具活动同列缩进。
+    leadingInset = MessageListMetrics.activityInset
     var configuration = UIButton.Configuration.plain()
     configuration.contentInsets = .zero
     configuration.imagePadding = 8
@@ -261,6 +274,8 @@ final class ToolMessageCell: MessageBlockCell {
 
   override init(frame: CGRect) {
     super.init(frame: frame)
+    // 活动行缩进（对齐 lody-ios）：工具从属于这轮 agent 的干活过程。
+    leadingInset = MessageListMetrics.activityInset
     header.alignment = .center
     style(heading, .footnote, color: MemohPalette.secondaryLabel(traitCollection))
     heading.lineBreakMode = .byWordWrapping

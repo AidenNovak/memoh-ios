@@ -238,6 +238,28 @@ final class MessageListTests: XCTestCase {
     XCTAssertEqual(cell.spinner.color, expected)
   }
 
+  func testActivityRowsIndentUnderFullWidthText() throws {
+    // R2 第 2 项：正文（结论）贴左，工具/思考活动行（过程）内缩——从属关系
+    // 靠缩进表达（对齐 lody-ios ChatCell.leading：tool/thought = 24 相对屏幕）。
+    let textCell = TextMessageCell(frame: .zero)
+    XCTAssertEqual(textCell.leadingInset, 0, "正文不缩进")
+    let toolCell = ToolMessageCell(frame: .zero)
+    XCTAssertEqual(toolCell.leadingInset, MessageListMetrics.activityInset, "工具活动行缩进")
+    let reasoningCell = ReasoningMessageCell(frame: .zero)
+    XCTAssertEqual(reasoningCell.leadingInset, MessageListMetrics.activityInset, "思考活动行缩进")
+    // 展开详情容器跟随活动行缩进（在同一列内下钻，不另起一列）。
+    let rows = try TranscriptRow.decode(MessageListLogicTests.transcript(
+      #"[{"key":"a","kind":"tool","name":"exec","status":"done","input":{"command":"pytest"}}]"#))
+    let group = try XCTUnwrap(MessageListLogicTests.toolGroups(rows).first)
+    toolCell.frame = CGRect(x: 0, y: 0, width: 390, height: 240)
+    toolCell.configure(group, expanded: true)
+    toolCell.layoutIfNeeded()
+    XCTAssertEqual(toolCell.stack.frame.minX, MessageListMetrics.activityInset, "活动行相对正文内缩")
+    // detailStack.frame 是相对 stack 的坐标；换算到 contentView 再比。
+    let detailX = toolCell.contentView.convert(toolCell.detailStack.frame.origin, from: toolCell.stack).x
+    XCTAssertEqual(detailX, toolCell.stack.frame.minX, "详情容器与活动行同列（跟随缩进）")
+  }
+
   func testToolCardExpansionLayersInputAndKeepsNeutralHeading() throws {
     // 输入条目：key 次要色 / value 正文色（R2 第 3 项）；失败诊断用危险红；
     // 标题保持中性，不因 isError 染色；耗时只在服务端给了才显示。
